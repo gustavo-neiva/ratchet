@@ -70,3 +70,51 @@ all_benched() {
   done
   return 0
 }
+
+# chain_for_tier TIER  — echo the effective model chain for plan|build|light.
+# Fallback: unset tier → $MODELS (the flat global chain).
+chain_for_tier() {
+  local tier="$1" chain=""
+  case "$tier" in
+    plan)  chain="$PLAN_MODELS" ;;
+    build) chain="$BUILD_MODELS" ;;
+    light) chain="$LIGHT_MODELS" ;;
+    *)     chain="" ;;
+  esac
+  [ -n "$chain" ] && echo "$chain" || echo "$MODELS"
+}
+
+# thinking_for_tier TIER  — echo the effective thinking level for a tier.
+# Fallback: unset tier thinking → $THINKING.
+# Special: tier=build-hard bumps one notch above THINKING_BUILD (capped at high),
+# but ONLY when THINKING_BUILD is empty; if THINKING_BUILD is explicitly set,
+# use it unchanged (the user has already configured the tier thinking).
+thinking_for_tier() {
+  local tier="$1" level=""
+  case "$tier" in
+    plan)  level="$THINKING_PLAN" ;;
+    build) level="$THINKING_BUILD" ;;
+    light) level="$THINKING_LIGHT" ;;
+    build-hard)
+      # Hard tasks: bump one notch above BUILD tier, but only if THINKING_BUILD is unset.
+      if [ -z "$THINKING_BUILD" ]; then
+        # THINKING_BUILD is unset → use global THINKING and bump it
+        level="$THINKING"
+        case "$level" in
+          off)     level="minimal" ;;
+          minimal) level="low" ;;
+          low)     level="medium" ;;
+          medium)  level="high" ;;
+          high)    level="high" ;;  # capped
+          xhigh)   level="high" ;;  # capped
+          *)       level="" ;;       # empty or unknown → fallback
+        esac
+      else
+        # THINKING_BUILD is explicitly set → honor it for hard tasks too
+        level="$THINKING_BUILD"
+      fi
+      ;;
+    *) level="" ;;
+  esac
+  [ -n "$level" ] && echo "$level" || echo "$THINKING"
+}

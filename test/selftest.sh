@@ -2,13 +2,14 @@
 # =============================================================================
 #  selftest.sh — verify ratchet's detection + loop logic (NO model calls)
 # =============================================================================
-#  Six suites:
+#  Seven suites:
 #    1. turn-outcome classification (token / exhausted / hard / transient)
 #    2. tracker tag extraction (trivial|normal|hard routing tags)
 #    3. contract parsing (allowlisted keys, unknown key rejection)
-#    4. cross-provider session sanitizer (strips thinking blocks)
-#    5. agnosticism grep-check (zero project knowledge in the tool)
-#    6. end-to-end: `ratchet once` against a fixture repo driven by fake-agent
+#    4. tier routing (chain_for_tier, thinking_for_tier with fallback)
+#    5. cross-provider session sanitizer (strips thinking blocks)
+#    6. agnosticism grep-check (zero project knowledge in the tool)
+#    7. end-to-end: `ratchet once` against a fixture repo driven by fake-agent
 #       -> proves spawn -> watchdog -> classify -> green gate -> commit works
 #          with ZERO api keys (this is what makes the loop testable in CI).
 #
@@ -30,10 +31,12 @@ LOG_DIR="$(mktemp -d)"
 
 # --- units under test ---------------------------------------------------------
 STEP_TOKEN="STEP_COMPLETE"; DONE_TOKEN="ALL_DONE"
+. "$RR/lib/common.sh"             # tier defaults
 . "$RR/lib/classify.sh"
 . "$RR/lib/session-sanitize.sh"
 . "$RR/lib/tracker.sh"
 . "$RR/lib/contract.sh"
+. "$RR/lib/model-fallback.sh"     # tier routing
 
 echo "== suite 1: turn classification =="
 check_class() {  # NAME EXPECTED STRING
@@ -110,7 +113,45 @@ check_unknown_key() {
 }
 check_unknown_key
 
-echo "== suite 4: session sanitizer =="
+echo "== suite 4: tier routing =="
+# chain_for_tier: unset tier -> MODELS fallback
+check_chain() {  # NAME TIER PLAN_M BUILD_M LIGHT_M MODELS EXPECTED
+  local name="$1" tier="$2" exp="$7" got
+  PLAN_MODELS="$3"; BUILD_MODELS="$4"; LIGHT_MODELS="$5"; MODELS="$6"
+  got="$(chain_for_tier "$tier")"
+  [ "$got" = "$exp" ] && ok "$name" || fail "$name -> got=$got want=$exp"
+}
+check_chain "plan-set" "plan" "p/a,p/b" "" "" "m/x" "p/a,p/b"
+check_chain "build-set" "build" "" "b/a,b/b" "" "m/x" "b/a,b/b"
+check_chain "light-set" "light" "" "" "l/a" "m/x" "l/a"
+check_chain "plan-unset" "plan" "" "" "" "m/x,m/y" "m/x,m/y"
+check_chain "build-unset" "build" "" "" "" "m/x,m/y" "m/x,m/y"
+check_chain "light-unset" "light" "" "" "" "m/x,m/y" "m/x,m/y"
+
+# thinking_for_tier: unset tier -> THINKING fallback, build-hard bump logic
+check_thinking() {  # NAME TIER PLAN_T BUILD_T LIGHT_T THINKING EXPECTED
+  local name="$1" tier="$2" exp="$7" got
+  THINKING_PLAN="$3"; THINKING_BUILD="$4"; THINKING_LIGHT="$5"; THINKING="$6"
+  got="$(thinking_for_tier "$tier")"
+  [ "$got" = "$exp" ] && ok "$name" || fail "$name -> got=$got want=$exp"
+}
+check_thinking "plan-set" "plan" "high" "" "" "low" "high"
+check_thinking "build-set" "build" "" "medium" "" "low" "medium"
+check_thinking "light-set" "light" "" "" "off" "low" "off"
+check_thinking "plan-unset" "plan" "" "" "" "low" "low"
+check_thinking "build-unset" "build" "" "" "" "medium" "medium"
+check_thinking "light-unset" "light" "" "" "" "high" "high"
+# build-hard bump logic: bump one notch above THINKING when THINKING_BUILD is empty
+check_thinking "hard-bump-off" "build-hard" "" "" "" "off" "minimal"
+check_thinking "hard-bump-minimal" "build-hard" "" "" "" "minimal" "low"
+check_thinking "hard-bump-low" "build-hard" "" "" "" "low" "medium"
+check_thinking "hard-bump-medium" "build-hard" "" "" "" "medium" "high"
+check_thinking "hard-bump-high" "build-hard" "" "" "" "high" "high"
+check_thinking "hard-bump-xhigh" "build-hard" "" "" "" "xhigh" "high"
+# build-hard with THINKING_BUILD set -> honor THINKING_BUILD, no bump
+check_thinking "hard-explicit" "build-hard" "" "low" "" "medium" "low"
+
+echo "== suite 5: session sanitizer =="
 if command -v python3 >/dev/null 2>&1; then
   sf="$LOG_DIR/sess.jsonl"
   {
@@ -146,7 +187,7 @@ else
   fail "python3 missing (sanitizer untested)"
 fi
 
-echo "== suite 5: agnosticism (zero project knowledge) =="
+echo "== suite 6: agnosticism (zero project knowledge) =="
 if grep -riE 'cookbook|cap_table|carta|erl_crash|issuance|reporting|jira|secm-' \
      "$RR/lib" "$RR/bin" "$RR/templates" 2>/dev/null; then
   fail "project knowledge leaked into lib/bin/templates"
@@ -154,7 +195,7 @@ else
   ok "no project knowledge in lib/bin/templates"
 fi
 
-echo "== suite 6: end-to-end (fake-agent, no api keys) =="
+echo "== suite 7: end-to-end (fake-agent, no api keys) =="
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 cp "$RR/test/fixtures/fixture-repo/PLAN.md" "$tmp/"
