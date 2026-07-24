@@ -188,8 +188,16 @@ main() {
   [ "$COMMAND" = "once" ] && ONCE=1
 
   PROMPT="${PROMPT_OVERRIDE:-$(build_default_prompt)}"
-  init_models "$MODELS"
-  [ -n "$MODELS" ] || die "no models configured (-m chain, MODELS in .ratchet.conf, or global conf)."
+  
+  # Initialize models: if MODELS is empty but tier keys are set, defer init to first turn.
+  # Otherwise, init with MODELS and validate it's non-empty.
+  if [ -z "$MODELS" ] && { [ -n "$PLAN_MODELS" ] || [ -n "$BUILD_MODELS" ] || [ -n "$LIGHT_MODELS" ]; }; then
+    # Tier keys are set; init will happen per-turn. Pick a default for the startup message.
+    models_arr=("<tier-routing>")
+  else
+    init_models "$MODELS"
+    [ -n "$MODELS" ] || die "no models configured (-m chain, MODELS in .ratchet.conf, or global conf)."
+  fi
 
   [ -d "$REPO_DIR/.git" ] || emit "warning: '$REPO_DIR' is not a git repo (continuing)"
 
@@ -211,18 +219,53 @@ main() {
 
   cd "$REPO_DIR" || die "cannot cd into $REPO_DIR"
 
-  local turn=0
+  local turn=0 current_tier="" current_tier_chain=""
   while true; do
     turn=$((turn+1))
+    
+    # Tier routing: determine tier from tracker tag, reinit models only on tier change.
+    local tag tier tier_chain tier_thinking
+    tag=$(tracker_next_tag)
+    case "$tag" in
+      trivial) tier="light" ;;
+      hard)    tier="build-hard" ;;  # bumps thinking unless THINKING_BUILD is set
+      *)       tier="build" ;;
+    esac
+    tier_chain=$(chain_for_tier "${tier%-hard}")  # strip -hard suffix for chain lookup
+    
+    # Reinit models ONLY when tier changes (preserve bench/cooldown state within a tier).
+    if [ "$tier_chain" != "$current_tier_chain" ]; then
+      init_models "$tier_chain"
+      current_tier="$tier"
+      current_tier_chain="$tier_chain"
+    fi
+    
     local idx; idx=$(pick_model_index)
     if [ "$idx" = "-1" ]; then
-      emit "ALL models benched (exhausted). Sleeping ${BOTH_WAIT}s, then reset + retry."
-      sleep "$BOTH_WAIT"
-      reset_all
-      continue
+      # Tier chain exhausted: fall back to global MODELS for one turn before sleeping.
+      if [ "$current_tier_chain" != "$MODELS" ]; then
+        emit "tier ($tier) chain exhausted — falling back to MODELS for this turn."
+        init_models "$MODELS"
+        current_tier_chain="$MODELS"
+        idx=$(pick_model_index)
+      fi
+      # If still -1, ALL models are benched.
+      if [ "$idx" = "-1" ]; then
+        emit "ALL models benched (exhausted). Sleeping ${BOTH_WAIT}s, then reset + retry."
+        sleep "$BOTH_WAIT"
+        reset_all
+        current_tier=""
+        current_tier_chain=""
+        continue
+      fi
     fi
+    
     local model="${models_arr[$idx]}"
+    tier_thinking=$(thinking_for_tier "$tier")
+    THINKING="$tier_thinking"  # set global THINKING for run_turn
+    
     emit "--- turn $turn | model=$model ---"
+    emit "turn $turn | tier=$tier | model=$model | thinking=$tier_thinking"
 
     run_turn "$model"
     show_excerpt

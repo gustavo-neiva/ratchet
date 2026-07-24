@@ -245,6 +245,75 @@ red_commits=$(git -C "$tmp" log --oneline 2>/dev/null | grep -c 'auto(ratchet): 
 if [ "$red_commits" = "0" ]; then ok "RED verify blocked the commit (no green, no commit)"
 else fail "RED turn was committed ($red_commits) — green gate failed"; fi
 
+# Tier routing end-to-end tests (new in v1.1)
+echo ""
+echo "== suite 8: tier routing end-to-end (unset keys, trivial tag) =="
+tmp2="$(mktemp -d)"
+trap 'rm -rf "$tmp2"' EXIT
+
+# Test (a): unset tier keys → old behavior (MODELS chain used)
+cat > "$tmp2/PLAN.md" <<'EOF'
+# Test plan
+- [ ] T1 (normal) first task
+- [ ] T2 (normal) second task
+EOF
+cat > "$tmp2/verify.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$tmp2/verify.sh"
+cat > "$tmp2/.ratchet.conf" <<'EOF'
+RATCHET_PROTOCOL=1
+TRACKER_FILE=PLAN.md
+VERIFY_CMD=./verify.sh
+EOF
+"$RATCHET" init "$tmp2" >/dev/null 2>&1
+git -C "$tmp2" init -q
+git -C "$tmp2" add -A
+git -C "$tmp2" commit -q -m "baseline"
+
+# Run with MODELS (no tier keys)
+"$RATCHET" once "$tmp2" -m fake/default --agent-cmd "$FAKE" >"$tmp2/run.log" 2>&1
+# Check that the log shows tier=build (default for normal tasks) but model is from MODELS
+if grep -q 'tier=build.*model=fake/default' "$tmp2/run.log"; then
+  ok "unset tier keys: tier=build routes to MODELS chain"
+else
+  fail "unset tier keys: expected tier=build with MODELS chain (see $tmp2/run.log)"
+fi
+
+# Test (b): trivial task routes to LIGHT_MODELS
+tmp3="$(mktemp -d)"
+trap 'rm -rf "$tmp3"' EXIT
+cat > "$tmp3/PLAN.md" <<'EOF'
+# Test plan
+- [ ] T1 (trivial) light task
+- [ ] T2 (normal) heavy task
+EOF
+cat > "$tmp3/verify.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$tmp3/verify.sh"
+cat > "$tmp3/.ratchet.conf" <<'EOF'
+RATCHET_PROTOCOL=1
+TRACKER_FILE=PLAN.md
+VERIFY_CMD=./verify.sh
+LIGHT_MODELS=fake/light-model
+BUILD_MODELS=fake/build-model
+EOF
+"$RATCHET" init "$tmp3" >/dev/null 2>&1
+git -C "$tmp3" init -q
+git -C "$tmp3" add -A
+git -C "$tmp3" commit -q -m "baseline"
+
+# Run once: should route the trivial task to LIGHT_MODELS
+"$RATCHET" once "$tmp3" --agent-cmd "$FAKE" >"$tmp3/run.log" 2>&1
+if grep -q 'tier=light.*model=fake/light-model' "$tmp3/run.log"; then
+  ok "trivial task routes to LIGHT_MODELS (tier=light)"
+else
+  fail "trivial task did not route to LIGHT_MODELS (see $tmp3/run.log)"
+fi
+
 echo ""
 echo "selftest: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
