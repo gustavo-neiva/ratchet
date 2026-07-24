@@ -258,7 +258,7 @@ one-line "what it's doing now".
       verify: bash test/selftest.sh   (extend the existing status suite: assert bar, milestone tree, ETA, current-marker present)
       constraints: reuse render_* + tracker_milestones; no new deps beyond existing (python3 optional); keep all parsed fields.
 
-- [IN PROGRESS] T4.2 (trivial) Document the live board.
+- [x] T4.2 (trivial) Document the live board.
       touches: README.md
       do: In the observability section, add `watch -n5 bin/ratchet status .` as
           the live PM board (native `watch`, zero new deps) and show a sample of
@@ -272,7 +272,7 @@ one-line "what it's doing now".
 
 ## Milestone 5 — docs + polish (parallel-safe)
 
-- [ ] T5.1 (trivial) README observability rewrite: the new terminal UX end-to-end.
+- [x] T5.1 (trivial) README observability rewrite: the new terminal UX end-to-end.
       touches: README.md
       do: Rewrite the "Feedback / observability" prose to describe the new
           run-time terminal (PM header, in-place heartbeat, curated summary) and

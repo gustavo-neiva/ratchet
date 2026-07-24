@@ -73,18 +73,79 @@ ratchet run my-repo --models zai/glm,anthropic/claude --verify-cmd "npm test"
 ratchet watch my-repo  # pretty-print the live session JSONL
 ```
 
-Output:
 ```
 [00:00] ratchet START  · models: zai/glm anthropic/claude · verify: npm test
-[00:00] --- turn 1 | model=zai/glm ---
-[00:15]   … working (15s)                      ← heartbeat (liveness proof)
-[00:41] --- agent output (last 12 lines) ---
-[00:41] STEP_COMPLETE
-[00:41] commit gate: running 'npm test' … green → committed turn 1
-[00:51] --- turn 2 | model=zai/glm ---
+◐ Step 1/52  [▓░░░░░░░░░ 1%]   M1 · kill the noise  (0/4)
+  ▶ T1.1 (normal)  in-place heartbeat, human words     build · glm-5-turbo
+  ⏱ turn 1 · 0m15s   avg —   ~51 turns / ETA unknown
+     … working (15s)                          ← in-place heartbeat (no byte counter)
+  summary                                     ← curated last lines, not a 12-line dump
+  STEP_COMPLETE
+  commit gate: running 'npm test' … green → committed turn 1
 ```
 
 **The safety punchline:** force a red turn (break a test) → `commit gate RED — NOT committing; left for next turn to repair.` Nothing bad ships.
+
+#### Feedback / observability
+
+The terminal is a **project-management board, not a log tail**. Every turn it
+answers the four questions a human actually has — *what step am I on, what is
+it doing right now, how many steps are left, how long until done* — at a glance:
+
+- **PM header** — a `Step D/T [bar PCT%]` line with the milestone + current
+  task (`▶ T5.4 … · build · glm-5-turbo`). This is where you are.
+- **In-place heartbeat** — a single status line that rewrites in place every
+  tick with a human verb (`thinking`, `working`, `running a tool`) and an
+  elapsed time. No new line per tick, no byte counter, no scroll spam. (Heart
+  beats only print to a TTY; the log stays clean.)
+- **Curated summary** — after the turn, the agent's **last few meaningful
+  lines**, not its whole inner monologue. Blank lines and tool chatter are
+  dropped. (`--summary-lines N`, default 4.)
+- **Timing + ETA** — `⏱ turn N · <elapsed> · avg <dur> · ~<rem> turns / ~<left>`.
+
+**The ETA is honestly labelled.** It is a naive `avg_turn_secs ×
+remaining_open` estimate — turn durations vary widely, so it is always
+prefixed `~` and renders `ETA unknown` until at least one turn has a recorded
+duration. Treat it as a rough guide, not a promise; it does not account for
+queueing, rate-limit cooldowns, or tasks of differing difficulty.
+
+The machine `loop.log` keeps its frozen key/value lines (turn, took, task
+counts); all of the above is a **terminal render layer** on top of that same
+data — the log formats are additive-only, and `ratchet stats` still parses
+old logs unchanged.
+
+#### The live board (`ratchet status`)
+
+The run terminal shows a per-turn PM header; for the project-management view,
+keep a second terminal on `ratchet status` refreshed by native `watch(1)` —
+zero new deps:
+
+```bash
+watch -n5 bin/ratchet status .   # refresh every 5s
+```
+
+Sample board (answers *what step, what's it doing, how many left, ETA*):
+
+```
+my-repo ●
+Step 33/52  [▓▓▓▓▓▓▓░░░░░ 63%]
+   Milestone 1 — safety net      [▓▓▓▓▓▓]  3/3
+   Milestone 2 — kill the noise  [▓▓▓▓▓▓]  4/4
+▶  Milestone 3 — timing & ETA    [▓▓▓░░░]  2/3
+   Milestone 4 — status board    [░░░░░░]  0/2
+
+Current: T3.2 wire ETA into the status block
+Tier/Model: build / glm-5-turbo (thinking=medium)
+Turn 5: 3m42s
+ETA: ~19 turns / ~57m left
+
+Doing: editing lib/render.sh to add the timing line
+
+Loop: running
+```
+
+`●` = loop alive; `▶` marks the milestone containing the current task; the ETA
+is a naive `avg_turn × remaining` estimate, always shown with `~`.
 
 ## How it works
 
@@ -269,8 +330,8 @@ models          List/add/remove/validate model chains (--tier, --pos, --repo)
 ### Feedback
 
 ```
---tail N                 Lines of agent output to show (default: 12)
---heartbeat N            Seconds between "working" pings (default: 15, 0=off)
+--summary-lines N        Curated agent summary lines after each turn (default: 4)
+--heartbeat N            Seconds between in-place activity pings (default: 15, 0=off)
 --stream                 Live-stream agent's raw output (noisy)
 --quiet                  Terminal silent; logs only
 -v, --verbose            Verbose logging
