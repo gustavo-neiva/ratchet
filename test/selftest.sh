@@ -739,8 +739,11 @@ else
 fi
 
 echo ""
-echo "== suite 16: FANOUT contract key (parity + gating proofs) =="
-# Test (a): FANOUT unset → agent invocation contains --no-extensions (parity)
+echo "== suite 16: FANOUT contract key (env-signal gating; extensions always on) =="
+# Extensions ALWAYS load (the OAuth-auth extension is one) — --no-extensions must
+# NEVER appear. FANOUT only gates the RATCHET_FANOUT/SCOUT env signal, and only
+# on (hard) tasks. These tests prove the signal gating, not extension toggling.
+# Test (a): FANOUT unset + (hard) task → NO scout env exported, extensions on
 tmpf1="$(mktemp -d)"
 cat > "$tmpf1/PLAN.md" <<'EOF'
 # Test plan
@@ -763,10 +766,15 @@ git -C "$tmpf1" commit -q -m "baseline"
 
 # Run with FANOUT unset (default off)
 "$RATCHET" once "$tmpf1" -v -m fake/model --agent-cmd "$FAKE" >"$tmpf1/run.log" 2>&1
-if grep -q 'invoking.*--no-extensions' "$tmpf1/run.log"; then
-  ok "FANOUT unset: --no-extensions present (parity proof)"
+if ! grep -q 'invoking.*--no-extensions' "$tmpf1/run.log"; then
+  ok "FANOUT unset: extensions loaded (no --no-extensions)"
 else
-  fail "FANOUT unset: --no-extensions not found in invocation (see $tmpf1/run.log)"
+  fail "FANOUT unset: --no-extensions present — would break OAuth auth (see $tmpf1/run.log)"
+fi
+if ! grep -q 'RATCHET_FANOUT=' "$tmpf1/run.log"; then
+  ok "FANOUT unset: no scout env exported"
+else
+  fail "FANOUT unset: RATCHET_FANOUT exported without FANOUT set (see $tmpf1/run.log)"
 fi
 rm -rf "$tmpf1"
 
@@ -795,9 +803,9 @@ git -C "$tmpf2" commit -q -m "baseline"
 
 "$RATCHET" once "$tmpf2" -v -m fake/model --agent-cmd "$FAKE" >"$tmpf2/run.log" 2>&1
 if ! grep -q 'invoking.*--no-extensions' "$tmpf2/run.log"; then
-  ok "FANOUT=scout + hard: --no-extensions dropped"
+  ok "FANOUT=scout + hard: extensions loaded (no --no-extensions)"
 else
-  fail "FANOUT=scout + hard: --no-extensions still present (see $tmpf2/run.log)"
+  fail "FANOUT=scout + hard: --no-extensions present (see $tmpf2/run.log)"
 fi
 # Check env export - fake-agent echoes env vars if they're set
 if grep -q 'RATCHET_FANOUT=scout' "$tmpf2/run.log" && grep -q 'RATCHET_SCOUT_MODELS=fake/scout' "$tmpf2/run.log"; then
@@ -831,10 +839,10 @@ git -C "$tmpf3" add -A
 git -C "$tmpf3" commit -q -m "baseline"
 
 "$RATCHET" once "$tmpf3" -v -m fake/model --agent-cmd "$FAKE" >"$tmpf3/run.log" 2>&1
-if grep -q 'invoking.*--no-extensions' "$tmpf3/run.log"; then
-  ok "FANOUT=scout + normal: --no-extensions still present (gating proof)"
+if ! grep -q 'RATCHET_FANOUT=' "$tmpf3/run.log"; then
+  ok "FANOUT=scout + normal: no scout env (gating proof — fanout only on hard)"
 else
-  fail "FANOUT=scout + normal: --no-extensions dropped incorrectly (see $tmpf3/run.log)"
+  fail "FANOUT=scout + normal: scout env exported on a non-hard task (see $tmpf3/run.log)"
 fi
 rm -rf "$tmpf3"
 

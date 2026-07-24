@@ -39,11 +39,13 @@ run_turn() {
   local thinking_args=()
   [ -n "$THINKING" ] && thinking_args=(--thinking "$THINKING")
 
-  # FANOUT strategy: when enabled and task is hard, allow subagent extensions.
-  # Otherwise: block extensions (parity with pre-FANOUT behavior).
-  local ext_args=(--no-extensions)
+  # Extensions ALWAYS load: the Anthropic OAuth-auth extension is itself an
+  # extension, so --no-extensions makes plan-auth requests bill as third-party
+  # "extra usage" and hard-error (HTTP 400). FANOUT does NOT toggle extensions
+  # — it only exports the env signal the AGENTS.md protocol reads to decide
+  # whether the agent may spawn subagents (gated there on hard tasks).
+  local ext_args=()
   if [ "$tag" = "hard" ] && [ -n "$FANOUT" ] && [ "$FANOUT" != "off" ]; then
-    ext_args=()
     export RATCHET_FANOUT="$FANOUT"
     export RATCHET_SCOUT_MODELS="$LIGHT_MODELS"
   fi
