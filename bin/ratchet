@@ -407,4 +407,7 @@ The current tracker task is: $next_task
   emit "ratchet END after $turn turn(s)."
 }
 
-main "$@"
+# ponytail: exit on the SAME parsed line as main so bash never streams another
+# byte after main returns — a self-edit mid-run (turns 6/10 rewrote this file)
+# shifts byte offsets and bash would execute a stray fragment as top-level code.
+main "$@"; exit $?

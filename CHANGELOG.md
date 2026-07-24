@@ -31,7 +31,7 @@ All notable changes to ratchet will be documented in this file.
 - ✅ Comprehensive README with examples
 - ✅ MIT LICENSE
 - ✅ Working demo-repo (calculator with intentional bug)
-- ✅ Self-test suite (19 tests, all passing)
+- ✅ Self-test suite (no API calls required)
 - ✅ Human checkpoints (plan authoring, plan review, PR review)
 
 ### Fixed
@@ -43,30 +43,10 @@ All notable changes to ratchet will be documented in this file.
 
 ## Roadmap
 
-### v1.1 - TypeScript Wrapper (Optional Enhancement)
-- [ ] `ts/src/cli.ts` - TypeScript CLI wrapper
-- [ ] `ts/src/pipeline.ts` - Sequential pipeline runner
-- [ ] `ts/src/schedule.ts` - Recurring/one-shot runs (wraps `@pi-agents/loop`)
-- [ ] `ts/src/pr.ts` - Push + open PR/MR via `gh`/`glab`
-- [ ] `ts/src/approve.ts` - Local diff-review server (opt-in)
-- [ ] `ts/src/worktree.ts` - Parallel tasks in isolated worktrees
-
-### v1.2 - Documentation & CI
-- [ ] docs/token-economy.md - Detailed cost analysis
-- [ ] docs/model-fallback.md - Cooldown/bench mechanics
-- [ ] docs/repo-contract.md - The 4-file contract deep-dive
-- [ ] docs/human-in-the-loop.md - The 4 checkpoints explained
-- [ ] docs/parallelism.md - Single vs N-worktree tradeoffs
-- [ ] .github/workflows/ci.yml - Run selftest + any TS tests
-
 ### v2.0 - Parallel Execution (Future)
 - [ ] `--parallel N` implementation
 - [ ] Git worktree isolation for non-`serial` tasks
-- [ ] Integration with `pi-subagents` parallel mode
 - [ ] Worktree convergence + single commit per worktree
 
-### Artifact 2 - Multi-Lens Review Skill (Separate Effort)
-- [ ] `skills/multi-lens-review/SKILL.md` - 5-lens review composition
-- [ ] Portable lenses (Senior, Security, Principal, Devil's Advocate, Karpathy)
-- [ ] Examples on public code/docs
-- [ ] Attribution to `superpowers` lineage
+### Documentation & CI
+- [ ] .github/workflows/ci.yml - Run selftest in CI

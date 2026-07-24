@@ -4,7 +4,7 @@ Thank you for considering contributing to ratchet! This is a clean, public, open
 
 ## Before you contribute
 
-1. **Run selftest**: `bin/ratchet --selftest` (all 19 tests must pass)
+1. **Run selftest**: `bin/ratchet --selftest` (all tests must pass)
 2. **Keep task-agnostic**: Zero project knowledge in `lib/`, `bin/`, `templates/`
 3. **Repo contract is the boundary**: The 4 files (`.ratchet.conf`, `AGENTS.md`, `PLAN.md`, `LEARNINGS.md`) are the ONLY place project specifics live
 
@@ -118,7 +118,6 @@ All project specifics live in the target repo's contract files (`.ratchet.conf`,
 - New provider integrations (model fallback)
 - Testing improvements
 - Performance optimizations
-- TypeScript wrapper (see ROADMAP)
 - Example repos / tutorials
 
 ## What to avoid

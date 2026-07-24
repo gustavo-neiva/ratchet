@@ -391,8 +391,7 @@ ratchet/
 │   ├── selftest.sh          # no-API verification
 │   └── fixtures/            # fake-agent + test repo
 ├── examples/demo-repo/      # toy project (tutorial)
-├── docs/                    # deep-dive docs
-└── ts/                      # (future) TypeScript wrapper
+└── docs/                    # deep-dive docs
 ```
 
 ## Evidence base

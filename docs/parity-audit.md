@@ -239,7 +239,7 @@ No new Milestone 3 tasks required.
 **Date**: 2025-07-24  
 **Conclusion**: **PARITY ACHIEVED**. Ratchet is a proven-successor to the old
 autonomous loop with zero regressions and multiple security/usability enhancements.
-The old loop's unattended-survival core is intact. All 19 selftests pass.
+The old loop's unattended-survival core is intact. All selftests pass.
 
 ---
 
