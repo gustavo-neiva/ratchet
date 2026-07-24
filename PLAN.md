@@ -138,7 +138,7 @@ one-line "what it's doing now".
       verify: bash test/selftest.sh   (case: render_activity mapping; assert no "b" byte-suffix in the new heartbeat format string)
       constraints: heartbeat stays term_only (never loop.log); bash 3.2; no new deps.
 
-- [IN PROGRESS] T1.2 (normal, serial) Curate the post-turn excerpt (summary, not a 12-line dump).
+- [x] T1.2 (normal, serial) Curate the post-turn excerpt (summary, not a 12-line dump).
       touches: lib/render.sh, lib/observability.sh, lib/common.sh, test/selftest.sh
       do: The agent's useful output is its FINAL summary, not its whole inner
           monologue. Add pure `render_summary NLINES` reading the extracted
@@ -160,7 +160,7 @@ one-line "what it's doing now".
 
 ## Milestone 2 — project-management header (serial: milestone parse + turn render)
 
-- [ ] T2.1 (normal, serial) Milestone awareness in the tracker parser.
+- [x] T2.1 (normal, serial) Milestone awareness in the tracker parser.
       touches: lib/tracker.sh, test/selftest.sh
       do: Add `tracker_milestones` — for each `## Milestone …` (also match a
           plain `## ` section that contains tasks) print `name<TAB>done<TAB>total`
@@ -178,7 +178,7 @@ one-line "what it's doing now".
       verify: bash test/selftest.sh   (fixture tracker: multi-milestone counts + current-milestone position)
       constraints: additive functions only; grammar-compatible with untagged trackers; bash 3.2.
 
-- [ ] T2.2 (normal, serial) The per-turn PM status block (terminal), machine line unchanged.
+- [x] T2.2 (normal, serial) The per-turn PM status block (terminal), machine line unchanged.
       touches: lib/render.sh, bin/ratchet, test/selftest.sh
       do: Add pure `render_status_block DONE TOTAL MNAME MDONE MTOTAL TURN TIER
           MODEL TASKID TASKTEXT` → the multi-line header shown in "What good
@@ -200,7 +200,7 @@ one-line "what it's doing now".
 
 ## Milestone 3 — timing & ETA (serial: both touch observability + render)
 
-- [ ] T3.1 (normal, serial) Turn-duration average + ETA math.
+- [IN PROGRESS] T3.1 (normal, serial) Turn-duration average + ETA math.
       touches: lib/observability.sh, lib/render.sh, test/selftest.sh
       do: Add `avg_turn_secs LOGFILE` — awk the `took=(\d+)s` lines to a mean
           integer (echo 0 if none; old logs without `took=` must not error).

@@ -80,6 +80,49 @@ check_activity "render_activity toolCall" "toolCall" "running a tool"
 check_activity "render_activity unknown" "some_random_event" "some_random_event"
 check_activity "render_activity empty" "" "working"
 
+# render_summary keeps last N meaningful lines (drops blanks)
+check_summary() {  # NAME NLINES INPUT EXPECTED
+  local name="$1" n="$2" input="$3" exp="$4" got
+  got="$(printf '%s' "$input" | render_summary "$n")"
+  [ "$got" = "$exp" ] && ok "$name" || fail "$name -> got='$got' want='$exp'"
+}
+check_summary "render_summary keeps-last-4" 4 "line1
+line2
+
+line3
+line4
+line5
+line6" "line3
+line4
+line5
+line6"
+check_summary "render_summary drops-blanks" 2 "line1
+
+  
+line2
+line3" "line2
+line3"
+check_summary "render_summary all-blank" 2 $'\n\n  \n' ""
+
+# render_status_block DONE TOTAL MNAME MDONE MTOTAL TURN TIER MODEL TASKID TASKTEXT
+check_status_block() {  # NAME ARGS... EXPECTED_SUBSTRING
+  local name="$1"; shift
+  local exp_sub="${!#}"; set -- "${@:1:$(($#-1))}"
+  local got; got="$(render_status_block "$@")"
+  if printf '%s' "$got" | grep -qF "$exp_sub"; then
+    ok "$name"
+  else
+    fail "$name -> missing substring '$exp_sub' in output"
+  fi
+}
+check_status_block "render_status_block Step line" 33 52 "M5 observability" 3 6 5 build glm-5-turbo T5.4 "heartbeat shows activity" "Step 33/52"
+check_status_block "render_status_block percent" 33 52 "M5 observability" 3 6 5 build glm-5-turbo T5.4 "heartbeat shows activity" "63%"
+check_status_block "render_status_block milestone" 33 52 "M5 observability" 3 6 5 build glm-5-turbo T5.4 "heartbeat shows activity" "M5 observability"
+check_status_block "render_status_block milestone counts" 33 52 "M5 observability" 3 6 5 build glm-5-turbo T5.4 "heartbeat shows activity" "(3/6)"
+check_status_block "render_status_block task id" 33 52 "M5 observability" 3 6 5 build glm-5-turbo T5.4 "heartbeat shows activity" "T5.4"
+check_status_block "render_status_block tier model" 33 52 "M5 observability" 3 6 5 build glm-5-turbo T5.4 "heartbeat shows activity" "build · glm-5-turbo"
+check_status_block "render_status_block no milestone" 10 20 "" 0 0 3 light gpt-4o-mini "?" "do the thing" "Step 10/20"
+
 echo "== suite 1: turn classification =="
 check_class() {  # NAME EXPECTED STRING
   local name="$1" exp="$2" str="$3" got f
@@ -146,7 +189,72 @@ check_id_text "inprogress-wins" "T2.1 (hard) $(printf '%.60s' 'big task with lon
 - [ ] T2.2 (trivial) small task"
 check_id_text "empty-tracker" "? (normal) " ""
 
-echo "== suite 3: contract parsing =="
+echo "== suite 3: milestone parsing =="
+check_milestones() {  # NAME EXPECTED_COUNT PLAN_CONTENT
+  local name="$1" exp_count="$2" content="$3" got tmpdir tmpplan count
+  tmpdir="$(mktemp -d)"
+  tmpplan="$tmpdir/PLAN.md"
+  printf '%s' "$content" > "$tmpplan"
+  REPO_DIR="$tmpdir" TRACKER_FILE="PLAN.md" got="$(tracker_milestones)"
+  rm -rf "$tmpdir"
+  [ -z "$got" ] && count=0 || count=$(echo "$got" | grep -c '^')
+  [ "$count" = "$exp_count" ] && ok "$name" || fail "$name -> got $count lines, want $exp_count"
+}
+check_milestones "no-milestones" "0" "- [ ] task without milestone"
+check_milestones "one-milestone" "1" "## Milestone 1
+- [ ] T1.1 (trivial) task
+- [x] T1.2 (normal) done"
+check_milestones "multi-milestone" "2" "## Milestone 0
+- [x] T0.1 (trivial) done
+## Milestone 1
+- [ ] T1.1 (normal) open
+- [IN PROGRESS] T1.2 (hard) inprog"
+
+check_milestone_counts() {  # NAME MNAME EXPECTED_DONE EXPECTED_TOTAL PLAN_CONTENT
+  local name="$1" mname="$2" exp_done="$3" exp_total="$4" content="$5" got tmpdir tmpplan line done total
+  tmpdir="$(mktemp -d)"
+  tmpplan="$tmpdir/PLAN.md"
+  printf '%s' "$content" > "$tmpplan"
+  REPO_DIR="$tmpdir" TRACKER_FILE="PLAN.md" got="$(tracker_milestones)"
+  rm -rf "$tmpdir"
+  line=$(echo "$got" | grep "^$mname")
+  done=$(echo "$line" | cut -f2)
+  total=$(echo "$line" | cut -f3)
+  [ "$done" = "$exp_done" ] && [ "$total" = "$exp_total" ] && ok "$name" || fail "$name -> got done=$done total=$total, want $exp_done/$exp_total"
+}
+check_milestone_counts "m1-counts" "Milestone 1" "1" "3" "## Milestone 1
+- [x] T1.1 (trivial) done
+- [ ] T1.2 (normal) open
+- [IN PROGRESS] T1.3 (hard) inprog"
+
+check_current_milestone() {  # NAME EXPECTED_NAME EXPECTED_IDX EXPECTED_TOTAL PLAN_CONTENT
+  local name="$1" exp_name="$2" exp_idx="$3" exp_total="$4" content="$5" got tmpdir tmpplan mname idx total
+  tmpdir="$(mktemp -d)"
+  tmpplan="$tmpdir/PLAN.md"
+  printf '%s' "$content" > "$tmpplan"
+  REPO_DIR="$tmpdir" TRACKER_FILE="PLAN.md" got="$(tracker_current_milestone)"
+  rm -rf "$tmpdir"
+  mname=$(echo "$got" | cut -f1)
+  idx=$(echo "$got" | cut -f2)
+  total=$(echo "$got" | cut -f3)
+  [ "$mname" = "$exp_name" ] && [ "$idx" = "$exp_idx" ] && [ "$total" = "$exp_total" ] && ok "$name" || fail "$name -> got '$mname' idx=$idx total=$total, want '$exp_name' $exp_idx $exp_total"
+}
+check_current_milestone "current-m2-idx3" "Milestone 2" "3" "4" "## Milestone 1
+- [x] T1.1 done
+## Milestone 2
+- [x] T2.1 done
+- [x] T2.2 done
+- [ ] T2.3 open first
+- [ ] T2.4 open"
+check_current_milestone "current-inprogress" "Milestone 5 — observability" "3" "6" "## Milestone 5 — observability
+- [x] T5.1 done
+- [x] T5.2 done
+- [IN PROGRESS] T5.3 inprog
+- [ ] T5.4 open
+- [ ] T5.5 open
+- [ ] T5.6 open"
+
+echo "== suite 4: contract parsing =="
 # Test that tier keys parse correctly
 check_tier_key() {
   local tmpconf; tmpconf="$(mktemp)"
@@ -173,7 +281,7 @@ check_unknown_key() {
 }
 check_unknown_key
 
-echo "== suite 4: tier routing =="
+echo "== suite 5: tier routing =="
 # chain_for_tier: unset tier -> MODELS fallback
 check_chain() {  # NAME TIER PLAN_M BUILD_M LIGHT_M MODELS EXPECTED
   local name="$1" tier="$2" exp="$7" got
@@ -211,7 +319,7 @@ check_thinking "hard-bump-xhigh" "build-hard" "" "" "" "xhigh" "high"
 # build-hard with THINKING_BUILD set -> honor THINKING_BUILD, no bump
 check_thinking "hard-explicit" "build-hard" "" "low" "" "medium" "low"
 
-echo "== suite 5: session sanitizer =="
+echo "== suite 6: session sanitizer =="
 if command -v python3 >/dev/null 2>&1; then
   sf="$LOG_DIR/sess.jsonl"
   {
@@ -247,7 +355,7 @@ else
   fail "python3 missing (sanitizer untested)"
 fi
 
-echo "== suite 6: agnosticism (zero project knowledge) =="
+echo "== suite 7: agnosticism (zero project knowledge) =="
 if grep -riE 'cookbook|cap_table|carta|erl_crash|issuance|reporting|jira|secm-' \
      "$RR/lib" "$RR/bin" "$RR/templates" 2>/dev/null; then
   fail "project knowledge leaked into lib/bin/templates"
@@ -255,7 +363,7 @@ else
   ok "no project knowledge in lib/bin/templates"
 fi
 
-echo "== suite 7: end-to-end (fake-agent, no api keys) =="
+echo "== suite 8: end-to-end (fake-agent, no api keys) =="
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 cp "$RR/test/fixtures/fixture-repo/PLAN.md" "$tmp/"
@@ -320,7 +428,7 @@ else fail "RED turn was committed ($red_commits) — green gate failed"; fi
 
 # Doctor tier warning test (new in v1.1)
 echo ""
-echo "== suite 8: doctor tier warning (LIGHT_MODELS without THINKING_LIGHT=off) =="
+echo "== suite 9: doctor tier warning (LIGHT_MODELS without THINKING_LIGHT=off) =="
 tmp_doc="$(mktemp -d)"
 trap 'rm -rf "$tmp_doc"' EXIT
 cat > "$tmp_doc/PLAN.md" <<'EOF'
@@ -352,7 +460,7 @@ fi
 
 # Tier routing end-to-end tests (new in v1.1)
 echo ""
-echo "== suite 9: tier routing end-to-end (unset keys, trivial tag) =="
+echo "== suite 10: tier routing end-to-end (unset keys, trivial tag) =="
 tmp2="$(mktemp -d)"
 trap 'rm -rf "$tmp2"' EXIT
 
@@ -420,7 +528,7 @@ else
 fi
 
 echo ""
-echo "== suite 10: builtin secret scan (BSD-grep-safe patterns) =="
+echo "== suite 11: builtin secret scan (BSD-grep-safe patterns) =="
 . "$RR/lib/commit-gate.sh"
 check_secret() {  # NAME EXPECT_RC(0=block,1=clean) CONTENT
   local name="$1" exp="$2" content="$3" d rc errf
@@ -480,7 +588,7 @@ check_tamper() {
 check_tamper
 
 echo ""
-echo "== suite 11: --cheap flag + staged-changes startup warning =="
+echo "== suite 12: --cheap flag + staged-changes startup warning =="
 tmp4="$(mktemp -d)"
 trap 'rm -rf "$tmp4"' EXIT
 cat > "$tmp4/PLAN.md" <<'EOF'
@@ -529,7 +637,7 @@ else
 fi
 
 echo ""
-echo "== suite 12: ratchet plan (one PLAN-tier turn, restricted commit) =="
+echo "== suite 13: ratchet plan (one PLAN-tier turn, restricted commit) =="
 tmp_p="$(mktemp -d)"
 trap 'rm -rf "$tmp_p"' EXIT
 cat > "$tmp_p/PLAN.md" <<'EOF'
@@ -601,7 +709,7 @@ else
 fi
 
 # --- suite 8: stats (tier and model counts from loop.log) ---------------
-echo "== suite 8: stats (tier/model counts) =="
+echo "== suite 14: stats (tier/model counts) =="
 . "$RR/lib/observability.sh"
 
 # (a) old format log (no tier lines) — must not break
@@ -667,7 +775,7 @@ else
 fi
 
 # --- suite 13: doctor mid-operation check (T4.2) ---------------
-echo "== suite 13: doctor mid-operation check (rebase-merge, MERGE_HEAD, etc.) =="
+echo "== suite 15: doctor mid-operation check (rebase-merge, MERGE_HEAD, etc.) =="
 tmp_mid="$(mktemp -d)"
 trap 'rm -rf "$tmp_mid"' EXIT
 cat > "$tmp_mid/PLAN.md" <<'EOF'
@@ -717,7 +825,7 @@ else
 fi
 
 echo ""
-echo "== suite 13: ratchet status (fixture log rendering + liveness) =="
+echo "== suite 16: ratchet status (fixture log rendering + liveness) =="
 tmp_s="$(mktemp -d)"
 trap 'rm -rf "$tmp_s"' EXIT
 
@@ -799,7 +907,7 @@ else
 fi
 
 echo ""
-echo "== suite 16: FANOUT contract key (env-signal gating; extensions always on) =="
+echo "== suite 17: FANOUT contract key (env-signal gating; extensions always on) =="
 # Extensions ALWAYS load (the OAuth-auth extension is one) — --no-extensions must
 # NEVER appear. FANOUT only gates the RATCHET_FANOUT/SCOUT env signal, and only
 # on (hard) tasks. These tests prove the signal gating, not extension toggling.
@@ -907,7 +1015,7 @@ fi
 rm -rf "$tmpf3"
 
 echo ""
-echo "== suite 17: ratchet models (chain ops, conf upsert, registry, cmd) =="
+echo "== suite 18: ratchet models (chain ops, conf upsert, registry, cmd) =="
 
 check_eq() { # NAME GOT WANT
   [ "$2" = "$3" ] && ok "$1" || fail "$1 -> got='$2' want='$3'"

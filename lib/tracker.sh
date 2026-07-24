@@ -143,3 +143,64 @@ tracker_next_id_and_text() {
   
   echo "$id ($tag) $text_clean"
 }
+
+# tracker_milestones -> prints "name<TAB>done<TAB>total" for each milestone section.
+# A milestone is any `## Milestone ...` or `## ` heading containing tasks.
+# Counts [x] vs [ ]|[IN PROGRESS] tasks under that heading until the next ## .
+tracker_milestones() {
+  local file="$REPO_DIR/$TRACKER_FILE"
+  [ -f "$file" ] || return 0
+  awk '
+    /^## / {
+      if (name != "" && total > 0) print name "\t" done "\t" total
+      name = $0; sub(/^## /, "", name)
+      done = 0; total = 0
+      next
+    }
+    /^[[:space:]]*-[[:space:]]*\[x\]/ { done++; total++; next }
+    /^[[:space:]]*-[[:space:]]*\[ \]/ { total++; next }
+    /^[[:space:]]*-[[:space:]]*\[IN PROGRESS\]/ { total++; next }
+    END { if (name != "" && total > 0) print name "\t" done "\t" total }
+  ' "$file"
+}
+
+# tracker_current_milestone -> echoes "name<TAB>idx<TAB>count<TAB>mdone<TAB>mtotal"
+# for the milestone containing the first open/IN PROGRESS task.
+# idx = 1-based position of the task within that milestone, count = total tasks in milestone.
+tracker_current_milestone() {
+  local file="$REPO_DIR/$TRACKER_FILE" first_open_line
+  [ -f "$file" ] || return 0
+  
+  # Find line number of first [IN PROGRESS] or [ ] task
+  first_open_line=$(tracker_next inprogress | sed -E 's/:.*$//')
+  [ -z "$first_open_line" ] && first_open_line=$(tracker_next open | sed -E 's/:.*$//')
+  [ -z "$first_open_line" ] && return 0
+  
+  awk -v target="$first_open_line" '
+    BEGIN { name=""; idx=0; mdone=0; mtotal=0; found=0 }
+    /^## / {
+      if (found) exit
+      name = $0; sub(/^## /, "", name)
+      idx = 0; mdone = 0; mtotal = 0
+      next
+    }
+    /^[[:space:]]*-[[:space:]]*\[x\]/ {
+      mdone++; mtotal++
+      if (!found) idx++
+      next
+    }
+    /^[[:space:]]*-[[:space:]]*\[ \]/ {
+      mtotal++
+      if (NR == target) { idx++; found = 1 }
+      else if (!found) idx++
+      next
+    }
+    /^[[:space:]]*-[[:space:]]*\[IN PROGRESS\]/ {
+      mtotal++
+      if (NR == target) { idx++; found = 1 }
+      else if (!found) idx++
+      next
+    }
+    END { if (found) print name "\t" idx "\t" mtotal "\t" mdone "\t" mtotal }
+  ' "$file"
+}

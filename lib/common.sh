@@ -67,6 +67,7 @@ SANITIZE_THINKING=1             # 1 = strip prior thinking blocks so any provide
 QUIET=0                         # 1 = terminal silent; logs only
 CHEAP_MODE=0                    # 1 = force ALL tiers to the LIGHT chain (--cheap)
 TAIL_LINES=12                   # lines of agent output to echo after a turn
+SUMMARY_LINES=4                 # meaningful lines to show in curated summary
 HEARTBEAT=15                    # seconds between "still working" pings (0 = off)
 STREAM_AGENT=0                  # 1 = live-stream the agent's raw output (noisy)
 

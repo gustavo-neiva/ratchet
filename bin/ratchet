@@ -307,6 +307,21 @@ main() {
     next_line=$(tracker_next inprogress); [ -z "$next_line" ] && next_line=$(tracker_next open)
     next_task=$(printf '%s' "$next_line" | sed -E 's/^[0-9]+://; s/^[[:space:]]*-?[[:space:]]*\[[^]]*\][[:space:]]*//')
     emit "tasks: ${done_n} done / ${total_n} total | next: $(printf '%.60s' "${next_task:-—}")"
+    
+    # Terminal-only PM status block (loop.log stays machine-readable)
+    local minfo mname mindex mcount mdone mtotal task_info taskid tasktext
+    minfo=$(tracker_current_milestone)
+    if [ -n "$minfo" ]; then
+      mname=$(printf '%s' "$minfo" | cut -f1)
+      mdone=$(printf '%s' "$minfo" | cut -f4)
+      mtotal=$(printf '%s' "$minfo" | cut -f5)
+    else
+      mname=""; mdone=0; mtotal=0
+    fi
+    task_info=$(tracker_next_id_and_text)
+    taskid=$(printf '%s' "$task_info" | sed -E 's/ \([^)]*\) .*//')
+    tasktext=$(printf '%s' "$task_info" | sed -E 's/^[^ ]* \([^)]*\) //')
+    term_only "$(render_status_block "$done_n" "$total_n" "$mname" "$mdone" "$mtotal" "$turn" "$tier" "$model" "$taskid" "$tasktext")"
 
     # inject the already-known current task into the prompt: saves the agent
     # 1-3 discovery round-trips per ephemeral turn (the tracker stays authoritative).
@@ -318,8 +333,7 @@ The current tracker task is: $next_task
     fi
 
     emit "--- turn $turn | model=$model ---"
-    local task_info; task_info=$(tracker_next_id_and_text)
-    emit "turn $turn | tier=$tier | model=$model | thinking=$tier_thinking | task=$task_info"
+    emit "turn $turn | tier=$tier | model=$model | thinking=$tier_thinking | task=$(tracker_next_id_and_text)"
 
     local turn_start=$SECONDS
     run_turn "$model" "$tag"

@@ -19,22 +19,22 @@ print_new_bytes() {
   printf -v "$offvar" '%s' "$sz"
 }
 
-# show_excerpt -> echo the last TAIL_LINES of the agent's output.
+# show_excerpt -> echo the last SUMMARY_LINES of the agent's output.
 # pi --mode json streams give one giant JSON line per event; extract the
 # assistant's text (text_delta fragments, unescaped) instead of raw JSON.
 show_excerpt() {
-  [ "${TAIL_LINES:-0}" -gt 0 ] || return 0
+  [ "${SUMMARY_LINES:-0}" -gt 0 ] || return 0
   [ -s "$TURN_OUT" ] || return 0
-  emit "--- agent output (last ${TAIL_LINES} lines) ---"
+  emit "--- summary ---"
   if head -c 32 "$TURN_OUT" 2>/dev/null | grep -q '^{"type":"session"'; then
     local joined
     joined=$(grep '"type":"text_delta"' "$TURN_OUT" 2>/dev/null \
       | sed -e 's/.*"delta":"//' -e 's/","partial.*//' \
       | awk '{printf "%s", $0}' \
       | sed -e 's/\\"/"/g')
-    printf '%b\n' "$joined" | grep -v '^[[:space:]]*$' | tail -n "$TAIL_LINES" | flow
+    printf '%b\n' "$joined" | render_summary "$SUMMARY_LINES" | flow
   else
-    tail -n "$TAIL_LINES" "$TURN_OUT" 2>/dev/null | flow
+    render_summary "$SUMMARY_LINES" <"$TURN_OUT" 2>/dev/null | flow
   fi
   emit "---"
 }

@@ -37,3 +37,34 @@ render_activity() {
     *) printf '%s' "${1:-working}";;
   esac
 }
+
+# render_summary NLINES -> reads agent output on stdin, keeps last meaningful block
+# Drops blank lines and tool chatter, keeps the last NLINES (default 4).
+render_summary() {
+  local nlines=${1:-4}
+  grep -v '^[[:space:]]*$' | tail -n "$nlines"
+}
+
+# render_status_block DONE TOTAL MNAME MDONE MTOTAL TURN TIER MODEL TASKID TASKTEXT
+# -> multi-line PM header: Step D/T [bar PCT%] · Mname (mdone/mtotal)
+#                          ▶ TASKID (tier) TASKTEXT   tier · model
+render_status_block() {
+  local done=$1 total=$2 mname=$3 mdone=$4 mtotal=$5
+  local turn=$6 tier=$7 model=$8 taskid=$9
+  shift 9; local tasktext="$*"
+  
+  local pct=0
+  [ "$total" -gt 0 ] && pct=$(( done * 100 / total ))
+  
+  local bar; bar="$(render_bar "$pct" 12)"
+  
+  # Line 1: Step D/T [bar PCT%] · Mname (mdone/mtotal)
+  printf 'Step %d/%d  [%s %d%%]' "$done" "$total" "$bar" "$pct"
+  if [ -n "$mname" ]; then
+    printf '   %s  (%d/%d)' "$mname" "$mdone" "$mtotal"
+  fi
+  printf '\n'
+  
+  # Line 2: ▶ TASKID (tier) TASKTEXT   tier · model
+  printf '  ▶ %s  %s   %s · %s\n' "$taskid" "$tasktext" "$tier" "$model"
+}
