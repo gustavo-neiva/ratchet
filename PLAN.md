@@ -200,7 +200,7 @@ one-line "what it's doing now".
 
 ## Milestone 3 — timing & ETA (serial: both touch observability + render)
 
-- [IN PROGRESS] T3.1 (normal, serial) Turn-duration average + ETA math.
+- [x] T3.1 (normal, serial) Turn-duration average + ETA math.
       touches: lib/observability.sh, lib/render.sh, test/selftest.sh
       do: Add `avg_turn_secs LOGFILE` — awk the `took=(\d+)s` lines to a mean
           integer (echo 0 if none; old logs without `took=` must not error).
@@ -216,7 +216,7 @@ one-line "what it's doing now".
       verify: bash test/selftest.sh   (fixture logs: with and without took= lines)
       constraints: additive; awk not python; tolerate malformed/old logs.
 
-- [ ] T3.2 (normal, serial) Wire ETA into the status block and the turn-end terminal line.
+- [x] T3.2 (normal, serial) Wire ETA into the status block and the turn-end terminal line.
       touches: lib/render.sh, bin/ratchet, test/selftest.sh
       do: Extend `render_status_block` (or add a `render_timing TURN ELAPSED AVG
           REMAINING` line the block appends) to show
@@ -235,7 +235,7 @@ one-line "what it's doing now".
 
 ## Milestone 4 — the `ratchet status` PM board (serial: rewrites cmd_status render)
 
-- [ ] T4.1 (hard, serial) Rewrite `cmd_status` output into a project-management board.
+- [x] T4.1 (hard, serial) Rewrite `cmd_status` output into a project-management board.
       touches: lib/commands.sh, test/selftest.sh
       do: Keep every field `cmd_status` already parses (turn, task, tier/model,
           elapsed/took, done/total, loop liveness, last output) — this is a
@@ -258,7 +258,7 @@ one-line "what it's doing now".
       verify: bash test/selftest.sh   (extend the existing status suite: assert bar, milestone tree, ETA, current-marker present)
       constraints: reuse render_* + tracker_milestones; no new deps beyond existing (python3 optional); keep all parsed fields.
 
-- [ ] T4.2 (trivial) Document the live board.
+- [IN PROGRESS] T4.2 (trivial) Document the live board.
       touches: README.md
       do: In the observability section, add `watch -n5 bin/ratchet status .` as
           the live PM board (native `watch`, zero new deps) and show a sample of

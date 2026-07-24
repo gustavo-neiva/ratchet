@@ -46,6 +46,7 @@ STEP_TOKEN="STEP_COMPLETE"; DONE_TOKEN="ALL_DONE"
 . "$RR/lib/commands.sh"           # cmd_status
 . "$RR/lib/models.sh"             # ratchet models (chain ops, upsert, registry)
 . "$RR/lib/render.sh"             # pure render functions
+. "$RR/lib/observability.sh"      # avg_turn_secs, show_excerpt
 
 echo "== suite 0: render (pure terminal functions) =="
 check_bar() {  # NAME PCT WIDTH EXPECTED
@@ -122,6 +123,61 @@ check_status_block "render_status_block milestone counts" 33 52 "M5 observabilit
 check_status_block "render_status_block task id" 33 52 "M5 observability" 3 6 5 build glm-5-turbo T5.4 "heartbeat shows activity" "T5.4"
 check_status_block "render_status_block tier model" 33 52 "M5 observability" 3 6 5 build glm-5-turbo T5.4 "heartbeat shows activity" "build · glm-5-turbo"
 check_status_block "render_status_block no milestone" 10 20 "" 0 0 3 light gpt-4o-mini "?" "do the thing" "Step 10/20"
+
+# fmt_dur SECS -> human-readable duration
+check_fmt_dur() {  # NAME SECS EXPECTED
+  local name="$1" secs="$2" exp="$3" got
+  got="$(fmt_dur "$secs")"
+  [ "$got" = "$exp" ] && ok "$name" || fail "$name -> got='$got' want='$exp'"
+}
+check_fmt_dur "fmt_dur 42s" 42 "42s"
+check_fmt_dur "fmt_dur 57m" 3420 "57m"
+check_fmt_dur "fmt_dur 1h20m" 4800 "1h20m"
+check_fmt_dur "fmt_dur 0s" 0 "0s"
+check_fmt_dur "fmt_dur 59s" 59 "59s"
+check_fmt_dur "fmt_dur 60s" 60 "1m"
+check_fmt_dur "fmt_dur 3599s" 3599 "59m"
+check_fmt_dur "fmt_dur 3600s" 3600 "1h0m"
+
+# render_eta REMAINING AVGSECS -> ETA string
+check_eta() {  # NAME REMAINING AVG EXPECTED_SUBSTRING
+  local name="$1" remaining="$2" avg="$3" exp_sub="$4" got
+  got="$(render_eta "$remaining" "$avg")"
+  if printf '%s' "$got" | grep -qF "$exp_sub"; then
+    ok "$name"
+  else
+    fail "$name -> missing substring '$exp_sub' in '$got'"
+  fi
+}
+check_eta "render_eta 19 turns" 19 180 "~19 turns"
+check_eta "render_eta 57m" 19 180 "~57m left"
+check_eta "render_eta avg=0" 19 0 "ETA unknown"
+check_eta "render_eta large" 100 300 "~100 turns"
+
+# render_timing TURN ELAPSED AVG REMAINING -> timing line
+check_timing() {  # NAME TURN ELAPSED AVG REMAINING EXPECTED_SUBSTRING
+  local name="$1" turn="$2" elapsed="$3" avg="$4" remaining="$5" exp_sub="$6" got
+  got="$(render_timing "$turn" "$elapsed" "$avg" "$remaining")"
+  if printf '%s' "$got" | grep -qF "$exp_sub"; then
+    ok "$name"
+  else
+    fail "$name -> missing substring '$exp_sub' in '$got'"
+  fi
+}
+check_timing "render_timing turn number" 5 222 180 19 "turn 5"
+check_timing "render_timing elapsed" 5 222 180 19 "3m"
+check_timing "render_timing avg" 5 222 180 19 "avg 3m"
+check_timing "render_timing eta" 5 222 180 19 "~57m left"
+
+# avg_turn_secs LOGFILE -> mean turn duration
+check_avg() {  # NAME LOGFILE EXPECTED
+  local name="$1" logfile="$2" exp="$3" got
+  got="$(avg_turn_secs "$logfile")"
+  [ "$got" = "$exp" ] && ok "$name" || fail "$name -> got='$got' want='$exp'"
+}
+check_avg "avg_turn_secs with-took" "$RR/test/fixtures/logs/with-took.log" 64
+check_avg "avg_turn_secs old-format" "$RR/test/fixtures/logs/old-format.log" 0
+check_avg "avg_turn_secs missing-file" "/nonexistent.log" 0
 
 echo "== suite 1: turn classification =="
 check_class() {  # NAME EXPECTED STRING
@@ -841,8 +897,10 @@ LOGEOF
 
 cat > "$tmp_s/PLAN.md" <<'PLANEOF'
 # Test Plan
+## Milestone 1 — Foundation
 - [x] T1.1 done task one
 - [x] T2.1 done task two
+## Milestone 2 — Features
 - [IN PROGRESS] T3.1 (trivial) add docs to README
 - [ ] T4.1 (normal) next task
 - [ ] T5.1 (hard) big task
@@ -864,43 +922,58 @@ LOG_DIR="$tmp_s/logs/test-project"
 LOOP_LOG="$tmp_s/logs/test-project/loop.log"
 TURN_OUT="$tmp_s/logs/test-project/last_turn.out"
 
-# (a) status with pid file and all fields present
+# (a) status with pid file and all fields present (PM board format)
 status_out="$(cmd_status 2>&1)"
-if printf '%s' "$status_out" | grep -q 'turn.*: 3'; then
+if printf '%s' "$status_out" | grep -q 'Turn 3'; then
   ok "status shows turn number"
 else
   fail "status missing turn number: $status_out"
 fi
-if printf '%s' "$status_out" | grep -q 'tier/model.*light / fake/model'; then
+if printf '%s' "$status_out" | grep -q 'Tier/Model.*light / fake/model'; then
   ok "status shows tier and model"
 else
   fail "status missing tier/model: $status_out"
 fi
-if printf '%s' "$status_out" | grep -q 'status.*: took 14s'; then
+if printf '%s' "$status_out" | grep -q 'took 14s'; then
   ok "status shows took= time for finished turn"
 else
   fail "status missing took= time: $status_out"
 fi
-if printf '%s' "$status_out" | grep -q 'progress.*: 2 done / 5 total'; then
-  ok "status shows tasks done/total"
+if printf '%s' "$status_out" | grep -q 'Step 2/5'; then
+  ok "status shows Step D/T progress bar"
 else
-  fail "status missing progress: $status_out"
+  fail "status missing Step D/T: $status_out"
 fi
-if printf '%s' "$status_out" | grep -q 'loop.*: running'; then
+if printf '%s' "$status_out" | grep -q 'Loop.*running'; then
   ok "status shows loop running (live pid)"
 else
   fail "status missing loop liveness: $status_out"
 fi
-if printf '%s' "$status_out" | grep -q 'All done'; then
-  ok "status shows last output lines"
+if printf '%s' "$status_out" | grep -q 'Doing:.*STEP_COMPLETE'; then
+  ok "status shows doing now line"
 else
-  fail "status missing last output: $status_out"
+  fail "status missing doing now: $status_out"
+fi
+if printf '%s' "$status_out" | grep -q 'Milestone 2'; then
+  ok "status shows milestone tree"
+else
+  fail "status missing milestone tree: $status_out"
+fi
+if printf '%s' "$status_out" | grep -q '▶.*Milestone 2'; then
+  ok "status marks current milestone with ▶"
+else
+  fail "status missing current milestone marker: $status_out"
+fi
+if printf '%s' "$status_out" | grep -qE 'ETA:.*turns'; then
+  ok "status shows ETA line"
+else
+  fail "status missing ETA: $status_out"
 fi
 
 # (b) status with no pid file → "not running"
 rm "$tmp_s/logs/test-project/loop.pid"
 status_out2="$(cmd_status 2>&1)"
-if printf '%s' "$status_out2" | grep -q 'loop.*: not running'; then
+if printf '%s' "$status_out2" | grep -q 'Loop.*not running'; then
   ok "status shows 'not running' when no pid file"
 else
   fail "status did not show 'not running': $status_out2"

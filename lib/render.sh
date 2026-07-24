@@ -68,3 +68,35 @@ render_status_block() {
   # Line 2: ▶ TASKID (tier) TASKTEXT   tier · model
   printf '  ▶ %s  %s   %s · %s\n' "$taskid" "$tasktext" "$tier" "$model"
 }
+
+# fmt_dur SECS -> human-readable duration (42s, 57m, 1h20m)
+fmt_dur() {
+  local secs=$1 h m
+  if [ "$secs" -lt 60 ]; then
+    printf '%ds' "$secs"
+  elif [ "$secs" -lt 3600 ]; then
+    printf '%dm' "$((secs / 60))"
+  else
+    h=$((secs / 3600))
+    m=$(( (secs % 3600) / 60 ))
+    printf '%dh%dm' "$h" "$m"
+  fi
+}
+
+# render_eta REMAINING AVGSECS -> "~19 turns / ~57m left" or "ETA unknown"
+render_eta() {
+  local remaining=$1 avg=$2
+  if [ "$avg" -eq 0 ]; then
+    printf 'ETA unknown'
+  else
+    local total_secs=$((remaining * avg))
+    printf '~%d turns / ~%s left' "$remaining" "$(fmt_dur "$total_secs")"
+  fi
+}
+
+# render_timing TURN ELAPSED AVG REMAINING -> "⏱ turn N · <dur>   avg <dur>   <eta>"
+render_timing() {
+  local turn=$1 elapsed=$2 avg=$3 remaining=$4
+  printf '  ⏱ turn %d · %s   avg %s   %s' \
+    "$turn" "$(fmt_dur "$elapsed")" "$(fmt_dur "$avg")" "$(render_eta "$remaining" "$avg")"
+}

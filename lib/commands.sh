@@ -275,8 +275,8 @@ cmd_status() {
   fi
   
   # Parse for elapsed/took time
-  local elapsed_took
-  local end_line took_s
+  local elapsed_took took_s
+  local end_line
   end_line=$(grep -E '^\[[^]]+\] turn [0-9]+ end \| class=' "$log" 2>/dev/null | tail -n1)
   if [ -n "$end_line" ]; then
     # Check if this is the same turn (finished)
@@ -303,30 +303,85 @@ cmd_status() {
   fi
   
   # Loop liveness from PID file
-  local loop_status
+  local loop_alive_dot loop_status
   if [ -f "$pid_file" ]; then
     local pid; pid=$(cat "$pid_file" 2>/dev/null)
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       loop_status="running (pid $pid)"
+      ansi_ok && loop_alive_dot="●" || loop_alive_dot="*"
     else
       loop_status="not running (stale pid $pid)"
+      loop_alive_dot="○"
     fi
   else
     loop_status="not running"
+    loop_alive_dot="○"
   fi
   
-  # Print status
-  echo "ratchet status: $REPO_DIR"
-  echo "  turn        : ${turn_num:-—}"
-  echo "  task        : ${task:-—}"
-  echo "  tier/model  : $tier / $model (thinking=$thinking)"
-  echo "  status      : $elapsed_took"
-  echo "  progress    : $done_n done / $total_n total"
-  echo "  loop        : $loop_status"
+  # Compute progress percentage
+  local pct=0
+  [ "$total_n" != "?" ] && [ "$total_n" -gt 0 ] && pct=$(( done_n * 100 / total_n ))
   
-  # Last 5 output lines from last_turn.out
+  # Get milestone info
+  local cur_milestone mname="" midx="" mcount="" mdone="" mtotal=""
+  if [ -f "$tracker" ]; then
+    cur_milestone=$(tracker_current_milestone)
+    if [ -n "$cur_milestone" ]; then
+      mname=$(echo "$cur_milestone" | cut -f1)
+      midx=$(echo "$cur_milestone" | cut -f2)
+      mcount=$(echo "$cur_milestone" | cut -f3)
+      mdone=$(echo "$cur_milestone" | cut -f4)
+      mtotal=$(echo "$cur_milestone" | cut -f5)
+    fi
+  fi
+  
+  # Get avg turn time and compute ETA
+  local avg_s remaining_n eta_str
+  avg_s=$(avg_turn_secs "$log")
+  remaining_n="$open_n"
+  [ "$remaining_n" = "?" ] && remaining_n=0
+  eta_str=$(render_eta "$remaining_n" "$avg_s")
+  
+  # Header: repo + loop-alive dot
+  local repo_name; repo_name=$(basename "$REPO_DIR")
+  ansi_ok && printf '\033[1m%s\033[0m %s\n' "$repo_name" "$loop_alive_dot" || printf '%s %s\n' "$repo_name" "$loop_alive_dot"
+  
+  # Progress bar with Step D/T (PCT%)
+  local bar; bar=$(render_bar "$pct" 12)
+  printf 'Step %s/%s  [%s %d%%]\n' "$done_n" "$total_n" "$bar" "$pct"
+  
+  # Milestone tree with mini-bars
+  if [ -f "$tracker" ]; then
+    local ms_line ms_name ms_done ms_total ms_pct ms_bar marker
+    while IFS=$'\t' read -r ms_name ms_done ms_total; do
+      ms_pct=0
+      [ "$ms_total" -gt 0 ] && ms_pct=$(( ms_done * 100 / ms_total ))
+      ms_bar=$(render_bar "$ms_pct" 6)
+      # Mark current milestone with ▶
+      if [ "$ms_name" = "$mname" ]; then
+        marker="▶"
+      else
+        marker=" "
+      fi
+      printf '%s %s  [%s]  %d/%d\n' "$marker" "$ms_name" "$ms_bar" "$ms_done" "$ms_total"
+    done < <(tracker_milestones)
+  fi
+  
+  # Current task + tier/model
+  if [ "$task" != "—" ]; then
+    printf '\nCurrent: %s\n' "$task"
+  fi
+  printf 'Tier/Model: %s / %s (thinking=%s)\n' "$tier" "$model" "$thinking"
+  
+  # Turn status and ETA
+  if [ "$turn_num" != "—" ]; then
+    printf 'Turn %s: %s\n' "$turn_num" "$elapsed_took"
+  fi
+  printf 'ETA: %s\n' "$eta_str"
+  
+  # "doing now" line from last_turn.out
   if [ -f "$turn_out" ] && [ -s "$turn_out" ]; then
-    echo "  last output :"
+    local doing_now
     # Handle JSON streaming format or plain text
     if head -c 32 "$turn_out" 2>/dev/null | grep -q '^{"type":"session"'; then
       # JSON streaming: extract text_delta fragments
@@ -335,16 +390,18 @@ cmd_status() {
         | sed -e 's/.*"delta":"//' -e 's/","partial.*//' \
         | awk '{printf "%s", $0}' \
         | sed -e 's/\\"/"/g')
-      printf '%b\n' "$joined" | grep -v '^[[:space:]]*$' | tail -n5 | sed 's/^/    /'
+      doing_now=$(printf '%b\n' "$joined" | render_summary 1)
     else
       # Plain text
-      tail -n5 "$turn_out" 2>/dev/null | sed 's/^/    /'
+      doing_now=$(render_summary 1 <"$turn_out" 2>/dev/null)
     fi
-  else
-    echo "  last output : (no output yet)"
+    if [ -n "$doing_now" ]; then
+      printf '\nDoing: %s\n' "$doing_now"
+    fi
   fi
-  echo "---"
-  echo "log: $log"
+  
+  printf '\nLoop: %s\n' "$loop_status"
+  printf 'Log: %s\n' "$log"
 }
 
 # ----------------------------- ratchet doctor --------------------------------

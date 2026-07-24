@@ -337,7 +337,13 @@ The current tracker task is: $next_task
 
     local turn_start=$SECONDS
     run_turn "$model" "$tag"
-    emit "turn $turn end | class=$TURN_STATUS | took=$((SECONDS-turn_start))s | task=$(printf '%.20s' "${next_task:-?}")"
+    local turn_elapsed=$((SECONDS-turn_start))
+    emit "turn $turn end | class=$TURN_STATUS | took=${turn_elapsed}s | task=$(printf '%.20s' "${next_task:-?}")"
+    
+    # Terminal-only timing line with ETA (loop.log has the frozen took= line above)
+    local avg_secs; avg_secs=$(avg_turn_secs "$LOOP_LOG")
+    term_only "$(render_timing "$turn" "$turn_elapsed" "$avg_secs" "$open_n")"
+    
     show_excerpt
 
     case "$TURN_STATUS" in

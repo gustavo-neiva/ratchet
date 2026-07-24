@@ -86,6 +86,22 @@ watch_session() {
     else empty end'
 }
 
+# avg_turn_secs LOGFILE -> mean turn duration in seconds from took= lines
+# Returns 0 if no took= lines found (old logs without timing).
+avg_turn_secs() {
+  local logfile="$1"
+  [ -f "$logfile" ] || { echo 0; return; }
+  awk '/took=[0-9]+s/ {
+    match($0, /took=[0-9]+s/)
+    s = substr($0, RSTART, RLENGTH)
+    sub(/took=/, "", s)
+    sub(/s/, "", s)
+    sum += s
+    count++
+  }
+  END { print (count>0 ? int(sum/count) : 0) }' "$logfile"
+}
+
 # cmd_stats -> parse loop.log into the baseline metrics (step-success rate,
 # wasted wall-hours per 100 turns, % turns on the cheap/first model, plus per-tier
 # and per-model counts from the `turn N | tier=X | model=Y` log lines, and avg/max
