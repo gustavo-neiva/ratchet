@@ -37,7 +37,7 @@ pre_scan() {
       -p|--prompt|-s|--session|-m|--models|--thinking|--turn-timeout|--cooldown|\
       --both-wait|--step-token|--done-token|--verify-cmd|--agent-cmd|\
       --cache-retention|--tail|--heartbeat) shift 2;;
-      init|new|doctor|run|once|selftest|stats|watch)
+      init|new|plan|doctor|run|once|selftest|stats|watch)
         [ -z "$COMMAND" ] && COMMAND="$1"; shift;;
       -*) shift;;
       *)
@@ -87,7 +87,7 @@ parse_args() {
       -v|--verbose)     VERBOSE=1; shift;;
       -h|--help)        usage; exit 0;;
       --) shift; break;;
-      init|new|doctor|run|once|selftest|stats|watch) COMMAND="$1"; shift;;
+      init|new|plan|doctor|run|once|selftest|stats|watch) COMMAND="$1"; shift;;
       -*) die "unknown option: $1 (see --help)";;
       *)
         if [ "$COMMAND" = "new" ] && [ -z "$PROMPT_OVERRIDE" ]; then
@@ -169,6 +169,7 @@ main() {
   case "$COMMAND" in
     init)    cmd_init "$REPO_DIR"; exit $? ;;
     new)     cmd_new "${PROMPT_OVERRIDE:-$NEW_IDEA}" "$REPO_DIR"; exit $? ;;
+    plan)    cmd_plan "$REPO_DIR"; exit $? ;;
     doctor)  cmd_doctor "$REPO_DIR" 0; exit $? ;;
     stats)   init_models "$MODELS"; cmd_stats; exit $? ;;
     watch)   init_models "$MODELS"; watch_session; exit $? ;;
@@ -281,6 +282,15 @@ main() {
     next_line=$(tracker_next inprogress); [ -z "$next_line" ] && next_line=$(tracker_next open)
     next_task=$(printf '%s' "$next_line" | sed -E 's/^[0-9]+://; s/^[[:space:]]*-?[[:space:]]*\[[^]]*\][[:space:]]*//')
     emit "tasks: ${done_n} done / ${total_n} total | next: $(printf '%.60s' "${next_task:-—}")"
+
+    # inject the already-known current task into the prompt: saves the agent
+    # 1-3 discovery round-trips per ephemeral turn (the tracker stays authoritative).
+    if [ -z "$PROMPT_OVERRIDE" ]; then
+      PROMPT="$(build_default_prompt)"
+      [ -n "$next_task" ] && PROMPT="$PROMPT
+The current tracker task is: $next_task
+(Verify it is still the first open/IN PROGRESS task in $TRACKER_FILE before starting.)"
+    fi
 
     emit "--- turn $turn | model=$model ---"
     emit "turn $turn | tier=$tier | model=$model | thinking=$tier_thinking"

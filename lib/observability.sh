@@ -20,11 +20,22 @@ print_new_bytes() {
 }
 
 # show_excerpt -> echo the last TAIL_LINES of the agent's output.
+# pi --mode json streams give one giant JSON line per event; extract the
+# assistant's text (text_delta fragments, unescaped) instead of raw JSON.
 show_excerpt() {
   [ "${TAIL_LINES:-0}" -gt 0 ] || return 0
   [ -s "$TURN_OUT" ] || return 0
   emit "--- agent output (last ${TAIL_LINES} lines) ---"
-  tail -n "$TAIL_LINES" "$TURN_OUT" 2>/dev/null | flow
+  if head -c 32 "$TURN_OUT" 2>/dev/null | grep -q '^{"type":"session"'; then
+    local joined
+    joined=$(grep '"type":"text_delta"' "$TURN_OUT" 2>/dev/null \
+      | sed -e 's/.*"delta":"//' -e 's/","partial.*//' \
+      | awk '{printf "%s", $0}' \
+      | sed -e 's/\\"/"/g')
+    printf '%b\n' "$joined" | grep -v '^[[:space:]]*$' | tail -n "$TAIL_LINES" | flow
+  else
+    tail -n "$TAIL_LINES" "$TURN_OUT" 2>/dev/null | flow
+  fi
   emit "---"
 }
 
@@ -76,7 +87,8 @@ watch_session() {
 }
 
 # cmd_stats -> parse loop.log into the baseline metrics (step-success rate,
-# wasted wall-hours per 100 turns, % turns on the cheap/first model).
+# wasted wall-hours per 100 turns, % turns on the cheap/first model, plus per-tier
+# and per-model counts from the `turn N | tier=X | model=Y` log lines.
 cmd_stats() {
   [ -f "$LOOP_LOG" ] || die "no loop.log found at $LOOP_LOG (nothing run here yet?)"
   command -v python3 >/dev/null 2>&1 || die "stats requires python3"
@@ -86,20 +98,29 @@ import re, sys, datetime
 path, cheap_model = sys.argv[1], sys.argv[2]
 ts_re = re.compile(r'^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] (.*)$')
 turn_re = re.compile(r'^--- turn (\d+) \| model=(\S+) ---$')
+tier_re = re.compile(r'^turn (\d+) \| tier=(\S+) \| model=(\S+) \| thinking=(\S+)$')
 def parse_ts(s): return datetime.datetime.strptime(s, '%Y-%m-%d %H:%M:%S')
 turns=cheap=steps=dones=dl_kills=exhausted=hard=transient=timeout=0
 wasted=0.0; cur_ts=None; benched_ts=None
+tier_counts={}; model_counts={}
 with open(path, encoding='utf-8', errors='replace') as fh:
     for raw in fh:
         m=ts_re.match(raw.rstrip('\n'))
         if not m: continue
-        ts=parse_ts(m.group(1)); rest=m.group(2); tm=turn_re.match(rest)
+        ts=parse_ts(m.group(1)); rest=m.group(2)
+        tm=turn_re.match(rest)
         if tm:
             turns+=1
             if tm.group(2)==cheap_model: cheap+=1
             if benched_ts is not None:
                 wasted+=(ts-benched_ts).total_seconds(); benched_ts=None
             cur_ts=ts; continue
+        tr=tier_re.match(rest)
+        if tr:
+            tier=tr.group(2); model=tr.group(3)
+            tier_counts[tier]=tier_counts.get(tier,0)+1
+            model_counts[model]=model_counts.get(model,0)+1
+            continue
         if 'terminating' in rest and 'deadline' in rest:
             dl_kills+=1
             if cur_ts is not None: wasted+=(ts-cur_ts).total_seconds()
@@ -121,5 +142,9 @@ print(f"failures              : hard={hard} transient={transient} timeout={timeo
 print(f"step-success rate     : {sr:.0f}%")
 print(f"deadline kills        : {dl_kills}")
 print(f"wasted wall-hours     : {wh:.2f}h  ({wp:.2f}h per 100 turns)")
+if tier_counts:
+    print(f"turns by tier         : {', '.join(f'{k}={v}' for k,v in sorted(tier_counts.items()))}")
+if model_counts:
+    print(f"turns by model        : {', '.join(f'{k}={v}' for k,v in sorted(model_counts.items()))}")
 PY
 }

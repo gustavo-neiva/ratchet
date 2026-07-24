@@ -52,8 +52,8 @@ but bump thinking one notch above `THINKING_BUILD` (max `high`) unless
 
 ## Milestone 2 — plan turns on existing repos (serial)
 
-- [ ] T2.1 (hard, serial) `ratchet plan [REPO]` command: run ONE turn using the PLAN tier (chain_for_tier plan) with a plan-drafting prompt: read the repo, read PLAN.md, draft/refresh open tasks (Milestone-0-walking-skeleton rule, tags on every task), then STOP with a loud "HUMAN: review PLAN.md before running". Never auto-runs the loop after. Reuse the plan-turn machinery from `ratchet new` (extract shared function if needed — smallest possible refactor). Selftest with fake agent: `plan` invokes exactly one turn and does not commit code changes outside PLAN.md/LEARNINGS.md.
-- [ ] T2.2 (trivial, serial) `ratchet stats`: extend to count turns per tier and per model from the new `tier=` log lines (old logs without tier lines must not break stats). Selftest: stats on a fixture log with and without tier lines.
+- [x] T2.1 (hard, serial) `ratchet plan [REPO]` command: run ONE turn using the PLAN tier (chain_for_tier plan) with a plan-drafting prompt: read the repo, read PLAN.md, draft/refresh open tasks (Milestone-0-walking-skeleton rule, tags on every task), then STOP with a loud "HUMAN: review PLAN.md before running". Never auto-runs the loop after. Reuse the plan-turn machinery from `ratchet new` (extract shared function if needed — smallest possible refactor). Selftest with fake agent: `plan` invokes exactly one turn and does not commit code changes outside PLAN.md/LEARNINGS.md.
+- [IN PROGRESS] T2.2 (normal, serial) `ratchet stats`: extend `cmd_stats` (the embedded python in `lib/observability.sh`) to count turns per tier and per model from the `turn N | tier=X | model=Y` log lines (old logs without tier lines must not break stats). Selftest: stats on a fixture log with and without tier lines.
 
 ## Milestone 3 — docs + parity follow-ups (parallel-safe)
 

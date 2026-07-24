@@ -107,6 +107,19 @@ cmd_init() {
 # ----------------------------- ratchet new -----------------------------------
 # Scaffold a fresh repo from an idea, draft PLAN.md, then STOP for the mandatory
 # human plan review (the one checkpoint the loop never skips).
+#
+# emit_plan_review_stop DIR TRACKER LINE... -> the mandatory human checkpoint
+# emitted after a plan turn (shared by `ratchet new` and `ratchet plan`). The
+# loop NEVER auto-runs after a plan turn — review comes first.
+emit_plan_review_stop() {
+  local dir="$1" tracker="$2"; shift 2
+  emit ""
+  emit "STOP FOR PLAN REVIEW (mandatory human checkpoint):"
+  local _line
+  for _line in "$@"; do emit "$_line"; done
+  emit "  (ratchet never auto-runs the loop after a plan — you review first.)"
+}
+
 cmd_new() {
   local idea="$1" dir="$2"
   [ -n "$idea" ] || die "usage: ratchet new \"<idea>\" [DIR]"
@@ -161,11 +174,69 @@ PLAN
   emit "  drafted PLAN.md"
 
   git add -A && git commit -q -m "scaffold: $idea (ratchet new)" && emit "  initial commit"
-  emit ""
-  emit "STOP FOR PLAN REVIEW (mandatory human checkpoint):"
-  emit "  1. Open $dir/PLAN.md and $dir/BRIEF.md."
-  emit "  2. Edit the plan until Milestone 0 + the feature milestones are right."
-  emit "  3. Commit your edits, then:  ratchet doctor $dir && ratchet run $dir"
+  emit_plan_review_stop "$dir" "$tr" \
+    "  1. Open $dir/PLAN.md and $dir/BRIEF.md." \
+    "  2. Edit the plan until Milestone 0 + the feature milestones are right." \
+    "  3. Commit your edits, then:  ratchet doctor $dir && ratchet run $dir"
+}
+
+# ----------------------------- ratchet plan ----------------------------------
+# ONE plan-drafting turn on the PLAN tier, then STOP for human review. Reads the
+# repo + tracker, drafts/refreshes open tasks (Milestone-0 walking skeleton, a
+# tag on every task), commits ONLY the tracker + LEARNINGS.md (never code), and
+# never auto-runs the loop. Reuses run_turn + the shared plan-review stop message
+# used by `ratchet new` (the smallest shared refactor — one extracted helper).
+cmd_plan() {
+  local dir="$1"
+  emit "ratchet plan: $dir (PLAN tier — ONE turn, then STOP for review)"
+
+  # finalize tracker (auto-detect if conf left it empty)
+  TRACKER_FILE="${TRACKER_FILE:-$(detect_tracker_file "$dir")}"
+  [ -n "$TRACKER_FILE" ] || TRACKER_FILE="PLAN.md"
+  [ -f "$dir/$TRACKER_FILE" ] || die "no tracker '$TRACKER_FILE' in $dir (run 'ratchet init $dir' first)."
+
+  # PLAN tier chain + thinking (fallback to MODELS/THINKING when unset).
+  init_models "$(chain_for_tier plan)"
+  local model; model="${models_arr[0]:-}"
+  [ -n "$model" ] || die "no model for PLAN tier (set PLAN_MODELS / MODELS / -m)."
+  local tier_think; tier_think=$(thinking_for_tier plan)
+  THINKING="$tier_think"
+
+  PROMPT="$(build_plan_prompt)"
+
+  cd "$dir" || die "cannot cd into $dir"
+
+  emit "plan turn 1 | tier=plan | model=$model | thinking=$tier_think"
+  local turn_start=$SECONDS
+  run_turn "$model"
+  emit "plan turn 1 end | class=$TURN_STATUS | took=$((SECONDS-turn_start))s"
+  show_excerpt
+
+  plan_commit "$dir"
+
+  emit_plan_review_stop "$dir" "$TRACKER_FILE" \
+    "  HUMAN: review $dir/$TRACKER_FILE before running the loop." \
+    "  Edit the plan (Milestone 0 + tags), then: ratchet doctor $dir && ratchet run $dir"
+}
+
+# plan_commit DIR -> commit ONLY the tracker + LEARNINGS.md from a plan turn.
+# A plan turn never lands code changes: no `git add -A`, no verify gate (the tree
+# may legitimately be RED while you plan), no contract-tamper guard (plan never
+# stages .ratchet.conf/AGENTS.md). One markdown-only commit, or nothing.
+plan_commit() {
+  local dir="$1"
+  [ "$COMMIT_EACH_TURN" = 1 ] || return 0
+  [ -d "$dir/.git" ] || { vlog "plan: not a git repo; skip commit"; return 0; }
+  git add -- "$TRACKER_FILE" LEARNINGS.md 2>/dev/null || true
+  if git diff --cached --quiet 2>/dev/null; then
+    emit "  nothing plan-staged to commit (idempotent plan turn)."
+    return 0
+  fi
+  if git commit -q -m "plan(ratchet): refresh $TRACKER_FILE" 2>>"$LOOP_LOG"; then
+    emit "  plan-committed: $TRACKER_FILE (+ LEARNINGS.md if changed)"
+  else
+    emit "  plan git commit failed (see $LOOP_LOG) — continuing."
+  fi
 }
 
 # ----------------------------- ratchet doctor --------------------------------

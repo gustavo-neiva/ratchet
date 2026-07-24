@@ -34,3 +34,15 @@ optional id and optional tags `(trivial|normal|hard)` and/or `serial`. Example:
 <!-- Add per-project rules, glossary, and conventions BELOW this line. Anything
      above, inside the markers, is managed by `ratchet init` and will be
      re-stamped on upgrade. -->
+
+## Project notes
+
+<!-- Add per-project rules, glossary, and conventions BELOW this line. Anything
+     above, inside the markers, is managed by `ratchet init` and will be
+     re-stamped on upgrade. -->
+
+## Project notes
+
+<!-- Add per-project rules, glossary, and conventions BELOW this line. Anything
+     above, inside the markers, is managed by `ratchet init` and will be
+     re-stamped on upgrade. -->

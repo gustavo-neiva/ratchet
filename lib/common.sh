@@ -23,6 +23,7 @@ RATCHET_PROTOCOL_VERSION="1"
 
 MODELS=""                       # comma-separated provider/id chain, e.g. "zai/glm,anthropic/claude"
 TURN_TIMEOUT=1800               # max wall-clock seconds for ONE agent turn (hang defense)
+STALL_TIMEOUT=300               # kill a turn whose output stops growing this long (streaming agents only)
 SHORT_SLEEP=10                  # seconds between normal turns
 MAX_TRANSIENT=3                 # consecutive transient/hard failures before a model is benched
 COOLDOWN=14400                  # seconds a benched model is skipped (≈ common daily-quota refresh)
@@ -113,6 +114,15 @@ build_default_prompt() {
   printf 'Do ONE discrete step of work on this repository'"'"'s current task, following the project'"'"'s AGENTS.md instructions. Write all changes to files; do not dump file contents in your reply. When the step is complete, print the token %s on its own line. If there is absolutely no remaining work, print the token %s on its own line instead.' "$STEP_TOKEN" "$DONE_TOKEN"
 }
 
+# Build the plan-drafting prompt for ONE `ratchet plan` turn (called late, after
+# TRACKER_FILE/STEP_TOKEN are finalized). The agent reads the repo + tracker,
+# drafts/refreshes open tasks (Milestone-0 walking skeleton, a tag on every
+# task), touches ONLY the tracker + LEARNINGS.md, then prints the step token and
+# stops. It must NOT write code or run the loop — plan is a markdown-only turn.
+build_plan_prompt() {
+  printf 'You are doing a PLAN-drafting turn (ratchet plan), not implementation. Read this repository, read %s, and draft or refresh the open tasks so the plan is concrete and actionable. Rules: keep a Milestone 0 walking skeleton whose verify gate is green; tag EVERY task trivial|normal|hard; make each task ONE discrete step; do NOT write or change code in this turn — only %s and LEARNINGS.md. When you have finished drafting/refreshing the plan, print the token %s on its own line and STOP. Do not run the build loop.' "$TRACKER_FILE" "$TRACKER_FILE" "$STEP_TOKEN"
+}
+
 # ----------------------------- project slug ----------------------------------
 # basename + 6-char path hash so two repos named "app" never collide in logs.
 # Uses cksum (POSIX, always present) for a stable, collision-resistant suffix.
@@ -138,6 +148,7 @@ Commands:
   once   [REPO]   Run exactly one turn, then exit (testing/debugging).
   init   [REPO]   Stamp AGENTS.md protocol + .ratchet.conf + seed PLAN.md (existing repo).
   new    "<idea>" Scaffold a repo, draft PLAN.md, then STOP for human plan review.
+  plan   [REPO]   ONE plan-drafting turn on the PLAN tier, then STOP for human review (never auto-runs).
   doctor [REPO]   Preflight: conf parses, tracker has open tasks, keys live, protocol current.
   selftest         Verify detection + loop logic against fixtures (NO agent calls). Exits 0/1.
   stats   [REPO]  Parse this repo's loop.log and print the baseline metrics, then exit.

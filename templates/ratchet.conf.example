@@ -34,5 +34,8 @@ DONE_TOKEN=ALL_DONE
 
 # Tunables (uncomment to override defaults):
 #TURN_TIMEOUT=1800
+# Kill a turn whose (streaming) output stops growing this long — hung-request
+# defense far cheaper than waiting out TURN_TIMEOUT. Buffered agents unaffected.
+#STALL_TIMEOUT=300
 #COOLDOWN=14400
 #HEARTBEAT=15

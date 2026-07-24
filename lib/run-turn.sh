@@ -16,6 +16,11 @@ TURN_STATUS=""
 run_turn() {
   local model="$1"
   : > "$TURN_OUT"                       # truncate per-turn agent output
+  # pi supports --mode json: events STREAM to stdout as they happen (text mode
+  # buffers everything until exit -> zero liveness signal). Streaming enables
+  # the heartbeat to show real activity and the stall-kill below to work.
+  local pi_json=0 mode_args=()
+  case "$(basename "$AGENT_CMD")" in pi) pi_json=1; mode_args=(--mode json);; esac
   local session_args=()
   if [ "$RESUME_SESSION" -eq 1 ]; then
     session_args=(--session-id "$SESSION_ID")
@@ -36,24 +41,41 @@ run_turn() {
   # Background the agent so the watchdog can early-kill on token OR hard-kill on
   # deadline. Agents other than pi tolerate the extra pi-style flags (they ignore
   # what they don't understand); for full control pass --agent-cmd.
-  "$AGENT_CMD" --model "$model" "${thinking_args[@]}" "${session_args[@]}" -p "$PROMPT" >"$TURN_OUT" 2>&1 &
+  "$AGENT_CMD" --model "$model" "${mode_args[@]}" "${thinking_args[@]}" "${session_args[@]}" -p "$PROMPT" >"$TURN_OUT" 2>&1 &
   local pid=$!
   local start=$SECONDS reason="" last_hb=0 stream_off=0
+  local tok=_has_token; [ "$pi_json" = 1 ] && tok=_has_token_json
+  local sz=0 last_sz=0 last_growth=$SECONDS
 
   while kill -0 "$pid" 2>/dev/null; do
-    if _has_token "$DONE_TOKEN" "$TURN_OUT" || _has_token "$STEP_TOKEN" "$TURN_OUT"; then
+    if $tok "$DONE_TOKEN" "$TURN_OUT" || $tok "$STEP_TOKEN" "$TURN_OUT"; then
       reason="token-seen"; break
     fi
     if (( SECONDS - start >= TURN_TIMEOUT )); then
       reason="deadline-${TURN_TIMEOUT}s"; break
     fi
+    # stall-kill: with a streaming agent, output that stops growing for
+    # STALL_TIMEOUT means a hung request — kill NOW instead of burning the
+    # remaining wall-clock cap. Only engages after the first byte, so fully
+    # buffered (non-pi) agents are never falsely killed.
+    sz=$(wc -c <"$TURN_OUT" 2>/dev/null); sz=${sz:-0}
+    if [ "$sz" -gt "$last_sz" ]; then last_sz=$sz; last_growth=$SECONDS
+    elif [ "$sz" -gt 0 ] && (( SECONDS - last_growth >= STALL_TIMEOUT )); then
+      reason="stall-${STALL_TIMEOUT}s"; break
+    fi
     # live feedback while the agent works
     if [ "$STREAM_AGENT" = 1 ]; then print_new_bytes stream_off; fi
     if [ "$QUIET" = 0 ] && [ "$HEARTBEAT" -gt 0 ] && (( SECONDS - start >= last_hb + HEARTBEAT )); then
       last_hb=$(( SECONDS - start ))
-      # show what the agent is actually doing: last non-empty output line (ANSI/CR-stripped)
-      local esc act; esc=$(printf '\033')
-      act=$(tail -c 2000 "$TURN_OUT" 2>/dev/null | tr -d '\r' | sed "s/${esc}\[[0-9;]*[A-Za-z]//g" | grep -v '^[[:space:]]*$' | tail -n1 | cut -c1-80)
+      local act
+      if [ "$pi_json" = 1 ]; then
+        # json stream: show last event type + volume (proof of life)
+        act="$(tail -n1 "$TURN_OUT" 2>/dev/null | sed -n 's/.*"type":"\([a-z_]*\)".*/\1/p') ${sz}b"
+      else
+        # show what the agent is actually doing: last non-empty output line (ANSI/CR-stripped)
+        local esc; esc=$(printf '\033')
+        act=$(tail -c 2000 "$TURN_OUT" 2>/dev/null | tr -d '\r' | sed "s/${esc}\[[0-9;]*[A-Za-z]//g" | grep -v '^[[:space:]]*$' | tail -n1 | cut -c1-80)
+      fi
       term_only "  ... working (${last_hb}s, model=$model)${act:+ | $act}"
     fi
     sleep 3
@@ -76,7 +98,7 @@ run_turn() {
   # with no token/error is `timeout` (still working past the cap), distinct from
   # `transient` (a network blip / empty reply) — keeps stats honest.
   local deadline=0
-  [ "$reason" = "deadline-${TURN_TIMEOUT}s" ] && deadline=1
-  TURN_STATUS="$(classify_turn "$TURN_OUT" "$STEP_TOKEN" "$DONE_TOKEN" "$deadline")"
+  case "$reason" in deadline-*|stall-*) deadline=1;; esac
+  TURN_STATUS="$(classify_turn "$TURN_OUT" "$STEP_TOKEN" "$DONE_TOKEN" "$deadline" "$pi_json")"
   vlog "turn classified: $TURN_STATUS"
 }

@@ -14,10 +14,16 @@
 # Literal token match: success is the exact token appearing anywhere in output.
 _has_token() { grep -qF -- "$1" "$2" 2>/dev/null; }
 
+# JSON-stream token match (pi --mode json): the user prompt (which names the
+# tokens) is echoed into the event stream, so only ASSISTANT text completions
+# (`text_end` events) count. Never grep the whole file in json mode.
+_has_token_json() { grep '"type":"text_end"' "$2" 2>/dev/null | grep -qF -- "$1"; }
+
 # Rate-limit / quota exhaustion. Covers Anthropic 429/529, Z.AI 130x codes,
 # and the generic "rate limit / quota / too many requests" family. -> bench model.
 _is_exhausted() {
-  grep -qiE '(request failed: HTTP (429|503|529))|("code"[[:space:]]*:[[:space:]]*"?130[2-8]"?)|(rate_limit_error|overloaded_error)|(rate[ _-]?limit)|(quota)|(insufficient.{0,30}(balance|quota|credit))|(daily.{0,15}(limit|quota))|(too many requests)|(exceed(ed|s)?.{0,15}(quota|limit|balance|rate))' "$1" 2>/dev/null
+  # \\? before quotes: json-mode streams JSON-escape provider errors (\"code\":\"1308\").
+  grep -qiE '(request failed: HTTP (429|503|529))|(auto_retry.{0,40}429)|(\\?"code\\?"[[:space:]]*:[[:space:]]*\\?"?130[2-8])|(rate_limit_error|overloaded_error)|(rate[ _-]?limit)|(quota)|(usage limit reached)|(insufficient.{0,30}(balance|quota|credit))|(daily.{0,15}(limit|quota))|(too many requests)|(exceed(ed|s)?.{0,15}(quota|limit|balance|rate))' "$1" 2>/dev/null
 }
 
 # Hard errors: auth, permission, not-found, bad request. -> strike (then bench).
@@ -27,13 +33,15 @@ _is_hard_error() {
   grep -qiE '(request failed: HTTP (400|401|403|404|413|422))|(authentication_error|permission_error|not_found_error|invalid_request_error)|(invalid.{0,10}(api[ _-]?key|token))|(unauthorized)' "$1" 2>/dev/null
 }
 
-# classify_turn FILE STEP_TOKEN DONE_TOKEN WAS_DEADLINE  -> echoes the class
+# classify_turn FILE STEP_TOKEN DONE_TOKEN WAS_DEADLINE [JSON]  -> echoes the class
 # Order matters: done before step (done is a stricter all-finished signal);
 # exhausted before hard (429 is HTTP-4xx-ish but means "retry later", not "broken").
+# JSON=1 (pi --mode json): token match restricted to assistant text events.
 classify_turn() {
-  local file="$1" st="$2" dt="$3" deadline="$4"
-  if   _has_token "$dt" "$file";       then echo "done"
-  elif _has_token "$st" "$file";       then echo "step"
+  local file="$1" st="$2" dt="$3" deadline="$4" tok=_has_token
+  [ "${5:-0}" = 1 ] && tok=_has_token_json
+  if   $tok "$dt" "$file";             then echo "done"
+  elif $tok "$st" "$file";             then echo "step"
   elif _is_exhausted  "$file";         then echo "exhausted"
   elif _is_hard_error "$file";         then echo "hard"
   elif [ "$deadline" = "1" ];          then echo "timeout"

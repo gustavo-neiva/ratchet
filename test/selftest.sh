@@ -414,6 +414,78 @@ else
 fi
 
 echo ""
+echo "== suite 12: ratchet plan (one PLAN-tier turn, restricted commit) =="
+tmp_p="$(mktemp -d)"
+trap 'rm -rf "$tmp_p"' EXIT
+cat > "$tmp_p/PLAN.md" <<'EOF'
+# Test plan
+- [ ] T1 (trivial) first
+- [ ] T2 (normal) second
+EOF
+cat > "$tmp_p/verify.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$tmp_p/verify.sh"
+cat > "$tmp_p/.ratchet.conf" <<'EOF'
+RATCHET_PROTOCOL=1
+TRACKER_FILE=PLAN.md
+VERIFY_CMD=./verify.sh
+PLAN_MODELS=fake/plan-model
+EOF
+"$RATCHET" init "$tmp_p" >/dev/null 2>&1
+git -C "$tmp_p" init -q
+# a tracked CODE file — plan must NOT sweep its (uncommitted) changes into the commit.
+printf 'fn main(){}\n' > "$tmp_p/src_main.rs"
+git -C "$tmp_p" add -A
+git -C "$tmp_p" commit -q -m "baseline"
+# uncommitted code change that must stay out of the plan commit
+printf 'fn main(){ /* uncommitted edit */ }\n' >> "$tmp_p/src_main.rs"
+
+"$RATCHET" plan "$tmp_p" --agent-cmd "$FAKE" >"$tmp_p/run.log" 2>&1
+rc=$?
+if [ "$rc" = 0 ]; then ok "ratchet plan exited 0"
+else fail "ratchet plan exit=$rc (see $tmp_p/run.log)"; fi
+
+# (a) exactly ONE plan-tier turn ran (no second turn)
+if grep -q 'plan turn 1 | tier=plan' "$tmp_p/run.log"; then
+  ok "plan runs one PLAN-tier turn"
+else
+  fail "plan did not log one PLAN-tier turn (see $tmp_p/run.log)"
+fi
+if grep -q 'plan turn 2' "$tmp_p/run.log"; then
+  fail "plan ran a second turn (must be exactly one) (see $tmp_p/run.log)"
+else
+  ok "plan stops after one turn (no loop)"
+fi
+
+# (b) plan stopped loudly for human review
+if grep -qi 'HUMAN: review' "$tmp_p/run.log" && grep -qi 'before running' "$tmp_p/run.log"; then
+  ok "plan stops with the loud HUMAN-review message"
+else
+  fail "plan did not stop loudly (see $tmp_p/run.log)"
+fi
+
+# (c) the plan commit touches ONLY the tracker (+ LEARNINGS.md), never code.
+plan_files=$(git -C "$tmp_p" show --name-only --format="" HEAD 2>/dev/null | tr -d ' ')
+if printf '%s\n' "$plan_files" | grep -qx 'PLAN.md'; then
+  ok "plan commit includes PLAN.md"
+else
+  fail "plan commit did not include PLAN.md (files: $(printf '%s' "$plan_files" | tr '\n' ' '))"
+fi
+if printf '%s\n' "$plan_files" | grep -qx 'src_main.rs'; then
+  fail "plan commit swept code changes (src_main.rs) — must be PLAN.md/LEARNINGS.md only"
+else
+  ok "plan commit excludes code changes (src_main.rs untouched)"
+fi
+# and the uncommitted code edit must still be uncommitted (working tree dirty)
+if ! git -C "$tmp_p" diff --quiet -- src_main.rs 2>/dev/null; then
+  ok "uncommitted code edit left in working tree (not swept into plan commit)"
+else
+  fail "uncommitted code edit was committed/staged by plan"
+fi
+
+echo ""
 echo "selftest: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
 exit 0
