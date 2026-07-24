@@ -1,0 +1,8 @@
+{
+  "name": "ratchet-demo",
+  "version": "1.0.0",
+  "description": "Demo project for ratchet autonomous loop",
+  "scripts": {
+    "test": "node test.js"
+  }
+}
