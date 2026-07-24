@@ -27,7 +27,7 @@ builtin_secret_scan() {
   [ -n "$diff" ] || return 0
   # patterns: private key headers, AWS keys, OpenAI/Anthropic-style sk-/sk-ant,
   # generic api_key/secret assignments, JWTs, .env file additions.
-  if printf '%s' "$diff" | grep -qiE -e '-----BEGIN (RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----'; then
+  if printf '%s' "$diff" | grep -qiE -e '-----BEGIN ((RSA|EC|OPENSSH|DSA) )?PRIVATE KEY-----'; then
     SECRET_BLOCK_REASON="private key material in staged diff"
   elif printf '%s' "$diff" | grep -qiE '(^|[^A-Za-z0-9])(AKIA[0-9A-Z]{16})([^A-Za-z0-9]|$)'; then
     SECRET_BLOCK_REASON="AWS access key id in staged diff"
