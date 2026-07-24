@@ -2,11 +2,12 @@
 # =============================================================================
 #  selftest.sh — verify ratchet's detection + loop logic (NO model calls)
 # =============================================================================
-#  Four suites:
+#  Five suites:
 #    1. turn-outcome classification (token / exhausted / hard / transient)
-#    2. cross-provider session sanitizer (strips thinking blocks)
-#    3. agnosticism grep-check (zero project knowledge in the tool)
-#    4. end-to-end: `ratchet once` against a fixture repo driven by fake-agent
+#    2. tracker tag extraction (trivial|normal|hard routing tags)
+#    3. cross-provider session sanitizer (strips thinking blocks)
+#    4. agnosticism grep-check (zero project knowledge in the tool)
+#    5. end-to-end: `ratchet once` against a fixture repo driven by fake-agent
 #       -> proves spawn -> watchdog -> classify -> green gate -> commit works
 #          with ZERO api keys (this is what makes the loop testable in CI).
 #
@@ -30,6 +31,7 @@ LOG_DIR="$(mktemp -d)"
 STEP_TOKEN="STEP_COMPLETE"; DONE_TOKEN="ALL_DONE"
 . "$RR/lib/classify.sh"
 . "$RR/lib/session-sanitize.sh"
+. "$RR/lib/tracker.sh"
 
 echo "== suite 1: turn classification =="
 check_class() {  # NAME EXPECTED STRING
@@ -60,7 +62,26 @@ check_deadline() {
 }
 check_deadline
 
-echo "== suite 2: session sanitizer =="
+echo "== suite 2: tracker tag extraction =="
+check_tag() {  # NAME EXPECTED PLAN_CONTENT
+  local name="$1" exp="$2" content="$3" got tmpdir tmpplan
+  tmpdir="$(mktemp -d)"
+  tmpplan="$tmpdir/PLAN.md"
+  printf '%s' "$content" > "$tmpplan"
+  REPO_DIR="$tmpdir" TRACKER_FILE="PLAN.md" got="$(tracker_next_tag)"
+  rm -rf "$tmpdir"
+  [ "$got" = "$exp" ] && ok "$name -> $got" || fail "$name -> got=$got want=$exp"
+}
+check_tag "trivial-tag" "trivial" "- [ ] T1.1 (trivial) do the thing"
+check_tag "normal-tag" "normal" "- [ ] T1.2 (normal, serial) design"
+check_tag "hard-tag" "hard" "- [ ] T1.3 (hard) implement"
+check_tag "untagged" "normal" "- [ ] do something"
+check_tag "empty-tracker" "normal" ""
+check_tag "inprogress-wins" "hard" "- [IN PROGRESS] T2.1 (hard) big task
+- [ ] T2.2 (trivial) small task"
+check_tag "only-done" "normal" "- [x] T1.1 (trivial) finished"
+
+echo "== suite 3: session sanitizer =="
 if command -v python3 >/dev/null 2>&1; then
   sf="$LOG_DIR/sess.jsonl"
   {
@@ -96,7 +117,7 @@ else
   fail "python3 missing (sanitizer untested)"
 fi
 
-echo "== suite 3: agnosticism (zero project knowledge) =="
+echo "== suite 4: agnosticism (zero project knowledge) =="
 if grep -riE 'cookbook|cap_table|carta|erl_crash|issuance|reporting|jira|secm-' \
      "$RR/lib" "$RR/bin" "$RR/templates" 2>/dev/null; then
   fail "project knowledge leaked into lib/bin/templates"
@@ -104,7 +125,7 @@ else
   ok "no project knowledge in lib/bin/templates"
 fi
 
-echo "== suite 4: end-to-end (fake-agent, no api keys) =="
+echo "== suite 5: end-to-end (fake-agent, no api keys) =="
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 cp "$RR/test/fixtures/fixture-repo/PLAN.md" "$tmp/"

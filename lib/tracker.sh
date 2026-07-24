@@ -70,3 +70,25 @@ tracker_completed_list() {
   grep -E '^[[:space:]]*-?[[:space:]]*\[x\]' "$file" \
     | sed -E 's/^[[:space:]]*-?[[:space:]]*//; s/\*\*//g'
 }
+
+# tracker_next_tag -> echoes the tag (trivial|normal|hard) of the first
+# [IN PROGRESS] task, or if none, the first [ ] task. Echoes "normal" when
+# untagged or no task exists. Used for tiered model routing.
+tracker_next_tag() {
+  local file="$REPO_DIR/$TRACKER_FILE" line tag
+  [ -f "$file" ] || { echo "normal"; return; }
+  
+  # Find the first [IN PROGRESS] task, else the first [ ] task
+  line=$(tracker_next inprogress)
+  [ -z "$line" ] && line=$(tracker_next open)
+  [ -z "$line" ] && { echo "normal"; return; }
+  
+  # Extract the tag from parentheses: (trivial|normal|hard)
+  # The line format is: - [ ] T1.2 (normal, serial) design...
+  # We want to extract the first tag in parens that matches trivial|normal|hard
+  tag=$(echo "$line" | sed -nE 's/.*\((trivial|normal|hard)[,)].*$/\1/p')
+  
+  # Default to "normal" if no tag found
+  [ -z "$tag" ] && tag="normal"
+  echo "$tag"
+}
