@@ -91,12 +91,15 @@ cmd_init() {
   stamp_protocol "$dir" "$tr" "$vc" "$STEP_TOKEN" "$DONE_TOKEN"
   emit "  stamped AGENTS.md protocol block (v$RATCHET_PROTOCOL_VERSION)"
 
-  # 6) .gitignore audit — keep loop junk out of commits.
-  if [ -f "$dir/.gitignore" ]; then
-    grep -qE '^\.ratchet/' "$dir/.gitignore" || printf '\n# ratchet runtime\n.ratchet/\n' >> "$dir/.gitignore"
-  else
-    printf '# ratchet runtime\n.ratchet/\n' > "$dir/.gitignore"
-  fi
+  # 6) .gitignore audit — keep loop junk AND the human-owned conf out of commits.
+  # .ratchet.conf MUST be ignored: the commit gate's `git add -A` would otherwise
+  # stage this untracked conf, and the contract-tamper guard then blocks EVERY
+  # turn (it treats any staged .ratchet.conf as the agent editing its own rules).
+  [ -f "$dir/.gitignore" ] || : > "$dir/.gitignore"
+  local line
+  for line in '.ratchet/' '.ratchet.conf'; do
+    grep -qxF "$line" "$dir/.gitignore" || printf '%s\n' "$line" >> "$dir/.gitignore"
+  done
 
   # 7) record the conf hash so a later change is surfaced for human ack.
   mkdir -p "$dir/.ratchet"; conf_hash "$conf" > "$dir/.ratchet/conf.hash"

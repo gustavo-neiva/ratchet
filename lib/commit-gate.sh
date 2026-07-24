@@ -49,18 +49,21 @@ builtin_secret_scan() {
   [ -n "$SECRET_BLOCK_REASON" ]
 }
 
-# conf_tampered -> 0 if .ratchet.conf OR a line inside the AGENTS.md protocol
-# markers is in the staged diff (the agent tried to edit its own contract).
+# conf_tampered -> 0 if a line inside the AGENTS.md protocol markers is in the
+# staged diff (the agent tried to rewrite its own contract). .ratchet.conf is
+# handled separately (silently unstaged) — it is never a loop commit and must
+# never fail a turn (see commit_turn).
 conf_tampered() {
-  git diff --cached --name-only 2>/dev/null | grep -qE '(^|/)\.ratchet\.conf$' && return 0
-  if git diff --cached --name-only 2>/dev/null | grep -qE '(^|/)AGENTS\.md$'; then
-    # a staged change that touches lines inside the managed markers is tampering
-    if git diff --cached -- AGENTS.md 2>/dev/null \
-       | grep -E '^[+-].*(ratchet-protocol:(begin|end))'; then
-      return 0
-    fi
-  fi
-  return 1
+  git diff --cached --name-only 2>/dev/null | grep -qE '(^|/)AGENTS\.md$' || return 1
+  # Compare the marker-delimited managed block between HEAD and the staged file.
+  # Any difference (markers OR the content between them) is tampering. sed range
+  # is inclusive of the two marker lines, so removing a marker also trips it.
+  local ext='ratchet-protocol:v[0-9]*:begin' end='ratchet-protocol:v[0-9]*:end'
+  local head_block staged_block
+  head_block=$(git show HEAD:AGENTS.md 2>/dev/null | sed -n "/$ext/,/$end/p")
+  staged_block=$(git show :AGENTS.md 2>/dev/null | sed -n "/$ext/,/$end/p")
+  [ "$head_block" = "$staged_block" ] && return 1
+  return 0
 }
 
 # commit_turn TURN MODEL -> 0 if committed (or cleanly nothing-to-commit),
@@ -77,13 +80,20 @@ commit_turn() {
   git add -A 2>/dev/null
   local g
   for g in $COMMIT_EXCLUDE_GLOBS; do git reset -q -- "$g" 2>/dev/null || true; done
+  # .ratchet.conf is human-owned and NEVER part of a loop commit. Silently drop
+  # it from staging (git add -A sweeps it in when a repo forgot to gitignore it).
+  # Do NOT fail the turn over it: an untracked conf can't be `git checkout`-restored,
+  # so the old block looped forever. The real anti-tamper guard (AGENTS.md markers)
+  # stays below.
+  git reset -q -- .ratchet.conf 2>/dev/null || true
 
-  # 1) contract-tamper guard (highest priority — never let the agent rewrite its rules).
+  # 1) contract-tamper guard: never let the agent rewrite the AGENTS.md protocol
+  # block (a tracked-file edit that IS restorable, so blocking self-heals).
   if conf_tampered; then
-    emit "  BLOCKED: turn tried to edit .ratchet.conf or the AGENTS.md protocol markers."
-    emit "  Reverting that change from staging (the contract is human-owned)."
-    git reset -q -- .ratchet.conf AGENTS.md 2>/dev/null || true
-    git checkout -- .ratchet.conf 2>/dev/null || true   # best-effort restore
+    emit "  BLOCKED: turn tried to edit the AGENTS.md protocol markers (human-owned)."
+    emit "  Reverting that change from staging."
+    git reset -q -- AGENTS.md 2>/dev/null || true
+    git checkout -- AGENTS.md 2>/dev/null || true   # best-effort restore
     return 1
   fi
 

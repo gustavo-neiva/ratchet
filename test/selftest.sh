@@ -419,6 +419,31 @@ check_secret_removed_only() {
 }
 check_secret_removed_only
 
+# Contract-tamper guard (commit_turn): editing the AGENTS.md protocol markers
+# blocks; an untracked .ratchet.conf swept in by `git add -A` must NOT fail the
+# turn (it is silently unstaged) — the bug that dead-locked a repo whose
+# .ratchet.conf wasn't gitignored.
+check_tamper() {
+  local d
+  d="$(mktemp -d)"; git -C "$d" init -q
+  git -C "$d" config user.email t@t; git -C "$d" config user.name t
+  printf '<!-- ratchet-protocol:v1:begin -->\nrules\n<!-- ratchet-protocol:v1:end -->\n' > "$d/AGENTS.md"
+  printf 'x\n' > "$d/file.txt"
+  git -C "$d" add AGENTS.md file.txt; git -C "$d" commit -qm init
+  # (a) untracked .ratchet.conf present + a normal edit -> conf silently unstaged, NOT a tamper
+  printf 'MODELS=a/b\n' > "$d/.ratchet.conf"
+  printf 'y\n' > "$d/file.txt"
+  ( cd "$d" && git add -A && git reset -q -- .ratchet.conf 2>/dev/null; conf_tampered ) && \
+    fail "tamper guard: untracked .ratchet.conf wrongly flagged" || ok "tamper guard: untracked .ratchet.conf not flagged"
+  # (b) editing inside the AGENTS.md protocol markers -> tamper
+  git -C "$d" checkout -q -- file.txt 2>/dev/null
+  printf '<!-- ratchet-protocol:v1:begin -->\nHACKED\n<!-- ratchet-protocol:v1:end -->\n' > "$d/AGENTS.md"
+  ( cd "$d" && git add -A; conf_tampered ) && ok "tamper guard: AGENTS.md marker edit blocked" || \
+    fail "tamper guard: AGENTS.md marker edit NOT blocked (dead regex?)"
+  rm -rf "$d"
+}
+check_tamper
+
 echo ""
 echo "== suite 11: --cheap flag + staged-changes startup warning =="
 tmp4="$(mktemp -d)"
