@@ -1,0 +1,27 @@
+{
+  "name": "ratchet",
+  "version": "1.1.0",
+  "description": "An unattended-but-safe agent loop. Survives provider rate limits and never commits a red tree.",
+  "license": "MIT",
+  "bin": {
+    "ratchet": "bin/ratchet"
+  },
+  "skills": [
+    "./skills"
+  ],
+  "files": [
+    "bin/**",
+    "lib/**",
+    "templates/**",
+    "skills/**"
+  ],
+  "keywords": [
+    "agent",
+    "autonomous",
+    "loop",
+    "pi",
+    "claude",
+    "rate-limit",
+    "spec-driven"
+  ]
+}

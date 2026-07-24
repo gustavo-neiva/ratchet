@@ -44,6 +44,13 @@ ratchet doctor /path/to/your/repo  # preflight: conf parses, tracker has work, t
 ratchet run /path/to/your/repo     # unattended until ALL_DONE
 ```
 
+**Authoring the plan:** a good `PLAN.md` is what lets the loop one-shot big work.
+The [`ratchet-plan` skill](skills/ratchet-plan/SKILL.md) (`skills/ratchet-plan/`)
+teaches the task schema — self-contained tasks, tier tags for model routing, and
+Given/When/Then acceptance that becomes the green gate. Symlink it into your
+agent's skills dir (`~/.claude/skills/` and/or `~/.pi/agent/skills/`), or install
+ratchet as a package (`"skills": ["./skills"]` in `package.json`) to auto-discover it.
+
 ### 2. Scaffold a new repo from an idea
 
 ```bash
