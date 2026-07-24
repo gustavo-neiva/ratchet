@@ -272,11 +272,22 @@ main() {
     local model="${models_arr[$idx]}"
     tier_thinking=$(thinking_for_tier "$tier")
     THINKING="$tier_thinking"  # set global THINKING for run_turn
-    
+
+    # progress: done/total + the task this turn will work on (additive UX line)
+    local done_n open_n total_n next_line next_task
+    done_n=$(tracker_count_done)
+    open_n=$(grep -cE '^[[:space:]]*-?[[:space:]]*\[( |IN PROGRESS)\]' "$REPO_DIR/$TRACKER_FILE" 2>/dev/null)
+    total_n=$(( done_n + ${open_n:-0} ))
+    next_line=$(tracker_next inprogress); [ -z "$next_line" ] && next_line=$(tracker_next open)
+    next_task=$(printf '%s' "$next_line" | sed -E 's/^[0-9]+://; s/^[[:space:]]*-?[[:space:]]*\[[^]]*\][[:space:]]*//')
+    emit "tasks: ${done_n} done / ${total_n} total | next: $(printf '%.60s' "${next_task:-—}")"
+
     emit "--- turn $turn | model=$model ---"
     emit "turn $turn | tier=$tier | model=$model | thinking=$tier_thinking"
 
+    local turn_start=$SECONDS
     run_turn "$model"
+    emit "turn $turn end | class=$TURN_STATUS | took=$((SECONDS-turn_start))s | task=$(printf '%.20s' "${next_task:-?}")"
     show_excerpt
 
     case "$TURN_STATUS" in

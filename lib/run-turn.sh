@@ -51,7 +51,10 @@ run_turn() {
     if [ "$STREAM_AGENT" = 1 ]; then print_new_bytes stream_off; fi
     if [ "$QUIET" = 0 ] && [ "$HEARTBEAT" -gt 0 ] && (( SECONDS - start >= last_hb + HEARTBEAT )); then
       last_hb=$(( SECONDS - start ))
-      term_only "  ... working (${last_hb}s, model=$model)"
+      # show what the agent is actually doing: last non-empty output line (ANSI/CR-stripped)
+      local esc act; esc=$(printf '\033')
+      act=$(tail -c 2000 "$TURN_OUT" 2>/dev/null | tr -d '\r' | sed "s/${esc}\[[0-9;]*[A-Za-z]//g" | grep -v '^[[:space:]]*$' | tail -n1 | cut -c1-80)
+      term_only "  ... working (${last_hb}s, model=$model)${act:+ | $act}"
     fi
     sleep 3
   done

@@ -402,6 +402,16 @@ if grep -q 'staged changes detected at startup' "$tmp4/run.log"; then
 else
   fail "no staged-changes warning (see $tmp4/run.log)"
 fi
+if grep -qE 'tasks: [0-9]+ done / [0-9]+ total \| next: T1' "$tmp4/run.log"; then
+  ok "progress line shows done/total + next task"
+else
+  fail "no progress line (see $tmp4/run.log)"
+fi
+if grep -qE 'turn 1 end \| class=step \| took=[0-9]+s \| task=T1' "$tmp4/run.log"; then
+  ok "turn summary line shows class + took= + task"
+else
+  fail "no turn summary took= line (see $tmp4/run.log)"
+fi
 
 echo ""
 echo "selftest: $PASS passed, $FAIL failed"

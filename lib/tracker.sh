@@ -40,9 +40,12 @@ tracker_has_inprogress() {
 
 # tracker_count_done -> echoes the number of [x] tasks (for the PR body + stats).
 tracker_count_done() {
-  local file="$REPO_DIR/$TRACKER_FILE"
+  local file="$REPO_DIR/$TRACKER_FILE" n
   [ -f "$file" ] || { echo 0; return; }
-  grep -cE '^[[:space:]]*-?[[:space:]]*\[x\]' "$file" || echo 0
+  # NOTE: grep -c prints "0" itself on no match (exit 1) — `|| echo 0` would
+  # double-print "0\n0" and break arithmetic callers.
+  n=$(grep -cE '^[[:space:]]*-?[[:space:]]*\[x\]' "$file" 2>/dev/null)
+  echo "${n:-0}"
 }
 
 # tracker_completed_subject -> one-line subject from the task line that flipped
