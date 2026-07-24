@@ -29,9 +29,11 @@ run_turn() {
       sanitize_session "$sf"
     fi
   else
-    # Ephemeral turns: no session replay, no extension discovery (the tracker +
-    # md files are the memory) -> leaner, faster, ~90% cheaper per turn.
-    session_args=(--no-session --no-extensions)
+    # Ephemeral turns: no session replay (the tracker + md files are the
+    # memory) -> leaner, faster, ~90% cheaper per turn. Extensions stay ON:
+    # the anthropic OAuth-auth extension must load or plan requests get billed
+    # as third-party "extra usage" and hard-error (HTTP 400).
+    session_args=(--no-session)
   fi
 
   local thinking_args=()
