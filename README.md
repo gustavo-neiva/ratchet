@@ -1,6 +1,8 @@
 # ratchet
 
-**An unattended-but-safe agent loop.** Runs a coding agent (Pi, Claude, or any `-p` CLI) ONE turn at a time, surviving provider rate limits and gating every commit on green. A RED tree is never committed.
+**An unattended-but-safe agent loop.** Survives provider rate limits and never commits a red tree.
+
+Runs a coding agent (Pi, Claude, or any `-p` CLI) ONE turn at a time with multi-provider fallback + cooldowns, gating every commit on green. RED blocks the commit.
 
 ```bash
 # Onboard any repo in 3 commands
@@ -150,6 +152,19 @@ MODELS="anthropic/claude-sonnet-4-5,zai/glm-5.2"
 THINKING="medium"
 ```
 
+### Cross-repo parallelism (Tier 0 — free throughput)
+
+Launch N `ratchet` processes on N independent repos. Already supported via `--dir`.
+
+```bash
+ratchet run --dir ~/Code/harbor      &
+ratchet run --dir ~/Code/ta_justo    &
+ratchet run --dir ~/Code/agroclaro   &
+wait
+```
+
+Free throughput not currently used. **Do this first.** (Same-repo parallel tasks need worktrees — see Tier 2.)
+
 ## Installation
 
 ```bash
@@ -164,11 +179,13 @@ export PATH="$PWD/bin:$PATH"
 ratchet --selftest
 ```
 
-**Requirements:**
+**Requirements:**[^deps]
 - Bash 3.2+ (macOS/Linux; no `timeout` binary needed)
 - Git
 - A headless agent: `pi` (default), `claude -p`, or any CLI that accepts `-p "prompt"`
 - Configured API keys for your models
+
+[^deps]: **Zero dependencies** for the loop core (pure bash). `ratchet stats` needs python3; `ratchet watch` prefers `jq` (degrades gracefully without it).
 
 ## Commands
 
@@ -229,6 +246,8 @@ watch   [REPO]  Pretty-print live session JSONL (2nd terminal)
 ## What this adds to the Pi ecosystem
 
 Pi already provides `pi-subagents` (delegate to child agents) and `@pi-agents/loop` (scheduled/recurring tasks). **ratchet** fills a different gap:
+
+**See [docs/comparison.md](docs/comparison.md)** for a full comparison with looper, loop-harness, and ouro-loop.
 
 | Feature | ratchet | pi-subagents | @pi-agents/loop |
 |---|---|---|---|

@@ -14,7 +14,7 @@
 TURN_STATUS=""
 
 run_turn() {
-  local model="$1"
+  local model="$1" tag="$2"
   : > "$TURN_OUT"                       # truncate per-turn agent output
   # pi supports --mode json: events STREAM to stdout as they happen (text mode
   # buffers everything until exit -> zero liveness signal). Streaming enables
@@ -39,11 +39,20 @@ run_turn() {
   local thinking_args=()
   [ -n "$THINKING" ] && thinking_args=(--thinking "$THINKING")
 
-  vlog "invoking: $AGENT_CMD --model $model ${thinking_args[*]} ${session_args[*]} -p <prompt>"
+  # FANOUT strategy: when enabled and task is hard, allow subagent extensions.
+  # Otherwise: block extensions (parity with pre-FANOUT behavior).
+  local ext_args=(--no-extensions)
+  if [ "$tag" = "hard" ] && [ -n "$FANOUT" ] && [ "$FANOUT" != "off" ]; then
+    ext_args=()
+    export RATCHET_FANOUT="$FANOUT"
+    export RATCHET_SCOUT_MODELS="$LIGHT_MODELS"
+  fi
+
+  vlog "invoking: $AGENT_CMD --model $model ${thinking_args[*]} ${session_args[*]} ${ext_args[*]} -p <prompt>"
   # Background the agent so the watchdog can early-kill on token OR hard-kill on
   # deadline. Agents other than pi tolerate the extra pi-style flags (they ignore
   # what they don't understand); for full control pass --agent-cmd.
-  "$AGENT_CMD" --model "$model" "${mode_args[@]}" "${thinking_args[@]}" "${session_args[@]}" -p "$PROMPT" >"$TURN_OUT" 2>&1 &
+  "$AGENT_CMD" --model "$model" "${mode_args[@]}" "${thinking_args[@]}" "${session_args[@]}" "${ext_args[@]}" -p "$PROMPT" >"$TURN_OUT" 2>&1 &
   local pid=$!
   local start=$SECONDS reason="" last_hb=0 stream_off=0
   local tok=_has_token; [ "$pi_json" = 1 ] && tok=_has_token_json

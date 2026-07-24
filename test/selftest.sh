@@ -37,6 +37,7 @@ STEP_TOKEN="STEP_COMPLETE"; DONE_TOKEN="ALL_DONE"
 . "$RR/lib/tracker.sh"
 . "$RR/lib/contract.sh"
 . "$RR/lib/model-fallback.sh"     # tier routing
+. "$RR/lib/commands.sh"           # cmd_status
 
 echo "== suite 1: turn classification =="
 check_class() {  # NAME EXPECTED STRING
@@ -85,6 +86,24 @@ check_tag "empty-tracker" "normal" ""
 check_tag "inprogress-wins" "hard" "- [IN PROGRESS] T2.1 (hard) big task
 - [ ] T2.2 (trivial) small task"
 check_tag "only-done" "normal" "- [x] T1.1 (trivial) finished"
+
+# tracker_next_id_and_text tests
+check_id_text() {  # NAME EXPECTED PLAN_CONTENT
+  local name="$1" exp="$2" content="$3" got tmpdir tmpplan
+  tmpdir="$(mktemp -d)"
+  tmpplan="$tmpdir/PLAN.md"
+  printf '%s' "$content" > "$tmpplan"
+  REPO_DIR="$tmpdir" TRACKER_FILE="PLAN.md" got="$(tracker_next_id_and_text)"
+  rm -rf "$tmpdir"
+  [ "$got" = "$exp" ] && ok "$name" || fail "$name -> got='$got' want='$exp'"
+}
+check_id_text "tagged-with-id" "T2.1 (hard) implement the parser quickly" "- [ ] T2.1 (hard) implement the parser quickly"
+check_id_text "tagged-no-id" "? (normal) do the thing" "- [ ] do the thing"
+check_id_text "untagged-no-id" "? (normal) simple task" "- [ ] simple task"
+check_id_text "long-text-truncate" "T5.1 (normal) $(printf '%.60s' 'Turn header shows the work: extend the additive tier line to')" "- [ ] T5.1 (normal) Turn header shows the work: extend the additive tier line to turn N | tier=X | model=Y | thinking=Z | task=T2.1 (hard) <first 60 chars of task text>"
+check_id_text "inprogress-wins" "T2.1 (hard) $(printf '%.60s' 'big task with long description that should be truncated at s')" "- [IN PROGRESS] T2.1 (hard) big task with long description that should be truncated at sixty characters
+- [ ] T2.2 (trivial) small task"
+check_id_text "empty-tracker" "? (normal) " ""
 
 echo "== suite 3: contract parsing =="
 # Test that tier keys parse correctly
@@ -211,6 +230,19 @@ EOF
 # init stamps the AGENTS.md protocol + localizes; then git-init a baseline.
 if "$RATCHET" init "$tmp" >>"$tmp/init.log" 2>&1; then ok "ratchet init"
 else fail "ratchet init (see $tmp/init.log)"; fi
+
+# fanout protocol block must be in template and stamped file (T6.3)
+if grep -q "Fanout strategy" "$RR/templates/AGENTS.protocol.md"; then
+  ok "template contains fanout protocol"
+else
+  fail "template missing fanout protocol block"
+fi
+if grep -q "Fanout strategy" "$tmp/AGENTS.md"; then
+  ok "ratchet init stamped fanout protocol"
+else
+  fail "stamped AGENTS.md missing fanout protocol"
+fi
+
 git -C "$tmp" init -q
 git -C "$tmp" add -A
 git -C "$tmp" commit -q -m "baseline"
@@ -363,6 +395,23 @@ check_secret() {  # NAME EXPECT_RC(0=block,1=clean) CONTENT
 check_secret "openssh-private-key blocks" 0 '-----BEGIN OPENSSH PRIVATE KEY-----'
 check_secret "bare-private-key blocks"    0 '-----BEGIN PRIVATE KEY-----'
 check_secret "clean-diff passes"          1 'just a normal line of code'
+
+# Regression: a secret marker only on a REMOVED or context line is NOT being
+# introduced by the commit and must NOT block (else the loop dead-locks when a
+# file legitimately documents/tests a secret shape). Scan added lines only.
+check_secret_removed_only() {
+  local d rc errf
+  d="$(mktemp -d)"; errf="$d/.stderr"
+  git -C "$d" init -q
+  printf 'key=-----BEGIN PRIVATE KEY-----\n' > "$d/f.txt"  # ratchet:allow-secret (test fixture, not a real key)
+  git -C "$d" add f.txt; git -C "$d" -c user.email=t@t -c user.name=t commit -qm init
+  printf 'key=redacted\n' > "$d/f.txt"; git -C "$d" add f.txt  # removes the marker line
+  ( cd "$d" && builtin_secret_scan 2>"$errf" ); rc=$?
+  if [ "$rc" = 1 ] && ! grep -q 'grep:' "$errf"; then ok "secret-scan removed-line marker passes"
+  else fail "secret-scan removed-line marker (rc=$rc want=1, stderr: $(cat "$errf"))"; fi
+  rm -rf "$d"
+}
+check_secret_removed_only
 
 echo ""
 echo "== suite 11: --cheap flag + staged-changes startup warning =="
@@ -530,6 +579,258 @@ if printf '%s' "$out" | grep -q 'turns by model.*anthropic/claude-fable-5=1' && 
 else
   fail "new-format log: model counts wrong or missing (got: $(printf '%s' "$out" | grep 'turns by model' || echo '<none>'))"
 fi
+
+# (c) old format log without took= lines — must not crash, skip duration section
+LOOP_LOG="$RR/test/fixtures/logs/old-format.log"
+models_arr=("anthropic/claude-sonnet-4")
+out="$(cmd_stats 2>&1)"
+if printf '%s' "$out" | grep -q 'turn duration'; then
+  fail "old-format log: should NOT show turn duration (no took= lines)"
+else
+  ok "old-format log: no turn duration (backward compat)"
+fi
+
+# (d) log with took= lines — shows avg and max duration
+LOOP_LOG="$RR/test/fixtures/logs/with-took.log"
+models_arr=("anthropic/claude-sonnet-4")
+out="$(cmd_stats 2>&1)"
+if printf '%s' "$out" | grep -qE 'turn duration.*avg=(64|65)s.*max=84s'; then
+  ok "with-took log: duration avg=64s max=84s"
+else
+  fail "with-took log: duration wrong or missing (got: $(printf '%s' "$out" | grep 'turn duration' || echo '<none>'))"
+fi
+
+# --- suite 13: doctor mid-operation check (T4.2) ---------------
+echo "== suite 13: doctor mid-operation check (rebase-merge, MERGE_HEAD, etc.) =="
+tmp_mid="$(mktemp -d)"
+trap 'rm -rf "$tmp_mid"' EXIT
+cat > "$tmp_mid/PLAN.md" <<'EOF'
+# Test plan
+- [ ] T1 (normal) task
+EOF
+cat > "$tmp_mid/verify.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$tmp_mid/verify.sh"
+cat > "$tmp_mid/.ratchet.conf" <<'EOF'
+RATCHET_PROTOCOL=1
+TRACKER_FILE=PLAN.md
+VERIFY_CMD=./verify.sh
+EOF
+"$RATCHET" init "$tmp_mid" >/dev/null 2>&1
+git -C "$tmp_mid" init -q >/dev/null 2>&1
+git -C "$tmp_mid" add -A
+git -C "$tmp_mid" commit -q -m "baseline" >/dev/null 2>&1
+
+# (a) fake rebase-merge dir → doctor fails with message
+mkdir -p "$tmp_mid/.git/rebase-merge"
+out_a="$("$RATCHET" doctor "$tmp_mid" 2>&1)"
+if printf '%s' "$out_a" | grep -q 'repo is mid-rebase'; then
+  ok "doctor detects .git/rebase-merge and fails with --quit advice"
+else
+  fail "doctor did not detect .git/rebase-merge"
+fi
+rmdir "$tmp_mid/.git/rebase-merge"
+
+# (b) fake MERGE_HEAD → doctor fails
+touch "$tmp_mid/.git/MERGE_HEAD"
+out_b="$("$RATCHET" doctor "$tmp_mid" 2>&1)"
+if printf '%s' "$out_b" | grep -q 'repo is mid-merge'; then
+  ok "doctor detects .git/MERGE_HEAD and fails"
+else
+  fail "doctor did not detect .git/MERGE_HEAD"
+fi
+rm "$tmp_mid/.git/MERGE_HEAD"
+
+# (c) clean state → doctor passes
+if "$RATCHET" doctor "$tmp_mid" >/dev/null 2>&1; then
+  ok "doctor passes when no mid-operation state"
+else
+  fail "doctor failed on clean repo"
+fi
+
+echo ""
+echo "== suite 13: ratchet status (fixture log rendering + liveness) =="
+tmp_s="$(mktemp -d)"
+trap 'rm -rf "$tmp_s"' EXIT
+
+# Build a fixture log directory with loop.log, tracker, last_turn.out, loop.pid
+mkdir -p "$tmp_s/logs/test-project"
+cat > "$tmp_s/logs/test-project/loop.log" <<'LOGEOF'
+[2026-01-01 10:00:00] ratchet START
+[2026-01-01 10:00:01] tasks: 2 done / 5 total | next: T3.1 (trivial) add docs
+[2026-01-01 10:00:01] --- turn 3 | model=fake/model ---
+[2026-01-01 10:00:01] turn 3 | tier=light | model=fake/model | thinking=off | task=T3.1 (trivial) add docs to README
+[2026-01-01 10:00:15] turn 3 end | class=step | took=14s | task=T3.1
+LOGEOF
+
+cat > "$tmp_s/PLAN.md" <<'PLANEOF'
+# Test Plan
+- [x] T1.1 done task one
+- [x] T2.1 done task two
+- [IN PROGRESS] T3.1 (trivial) add docs to README
+- [ ] T4.1 (normal) next task
+- [ ] T5.1 (hard) big task
+PLANEOF
+
+cat > "$tmp_s/logs/test-project/last_turn.out" <<'OUTEOF'
+Added docs to README.
+All done.
+STEP_COMPLETE
+OUTEOF
+
+# Create a PID file with a running process (our own shell pid is fine for test)
+echo $$ > "$tmp_s/logs/test-project/loop.pid"
+
+# Export environment for status command
+REPO_DIR="$tmp_s"
+TRACKER_FILE="PLAN.md"
+LOG_DIR="$tmp_s/logs/test-project"
+LOOP_LOG="$tmp_s/logs/test-project/loop.log"
+TURN_OUT="$tmp_s/logs/test-project/last_turn.out"
+
+# (a) status with pid file and all fields present
+status_out="$(cmd_status 2>&1)"
+if printf '%s' "$status_out" | grep -q 'turn.*: 3'; then
+  ok "status shows turn number"
+else
+  fail "status missing turn number: $status_out"
+fi
+if printf '%s' "$status_out" | grep -q 'tier/model.*light / fake/model'; then
+  ok "status shows tier and model"
+else
+  fail "status missing tier/model: $status_out"
+fi
+if printf '%s' "$status_out" | grep -q 'status.*: took 14s'; then
+  ok "status shows took= time for finished turn"
+else
+  fail "status missing took= time: $status_out"
+fi
+if printf '%s' "$status_out" | grep -q 'progress.*: 2 done / 5 total'; then
+  ok "status shows tasks done/total"
+else
+  fail "status missing progress: $status_out"
+fi
+if printf '%s' "$status_out" | grep -q 'loop.*: running'; then
+  ok "status shows loop running (live pid)"
+else
+  fail "status missing loop liveness: $status_out"
+fi
+if printf '%s' "$status_out" | grep -q 'All done'; then
+  ok "status shows last output lines"
+else
+  fail "status missing last output: $status_out"
+fi
+
+# (b) status with no pid file → "not running"
+rm "$tmp_s/logs/test-project/loop.pid"
+status_out2="$(cmd_status 2>&1)"
+if printf '%s' "$status_out2" | grep -q 'loop.*: not running'; then
+  ok "status shows 'not running' when no pid file"
+else
+  fail "status did not show 'not running': $status_out2"
+fi
+
+echo ""
+echo "== suite 16: FANOUT contract key (parity + gating proofs) =="
+# Test (a): FANOUT unset → agent invocation contains --no-extensions (parity)
+tmpf1="$(mktemp -d)"
+cat > "$tmpf1/PLAN.md" <<'EOF'
+# Test plan
+- [ ] T1 (hard) test task
+EOF
+cat > "$tmpf1/verify.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$tmpf1/verify.sh"
+cat > "$tmpf1/.ratchet.conf" <<'EOF'
+RATCHET_PROTOCOL=1
+TRACKER_FILE=PLAN.md
+VERIFY_CMD=./verify.sh
+EOF
+"$RATCHET" init "$tmpf1" >/dev/null 2>&1
+git -C "$tmpf1" init -q
+git -C "$tmpf1" add -A
+git -C "$tmpf1" commit -q -m "baseline"
+
+# Run with FANOUT unset (default off)
+"$RATCHET" once "$tmpf1" -v -m fake/model --agent-cmd "$FAKE" >"$tmpf1/run.log" 2>&1
+if grep -q 'invoking.*--no-extensions' "$tmpf1/run.log"; then
+  ok "FANOUT unset: --no-extensions present (parity proof)"
+else
+  fail "FANOUT unset: --no-extensions not found in invocation (see $tmpf1/run.log)"
+fi
+rm -rf "$tmpf1"
+
+# Test (b): FANOUT=scout + (hard) task → no --no-extensions, env exported
+tmpf2="$(mktemp -d)"
+cat > "$tmpf2/PLAN.md" <<'EOF'
+# Test plan
+- [ ] T1 (hard) hard task
+EOF
+cat > "$tmpf2/verify.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$tmpf2/verify.sh"
+cat > "$tmpf2/.ratchet.conf" <<'EOF'
+RATCHET_PROTOCOL=1
+TRACKER_FILE=PLAN.md
+VERIFY_CMD=./verify.sh
+FANOUT=scout
+LIGHT_MODELS=fake/scout
+EOF
+"$RATCHET" init "$tmpf2" >/dev/null 2>&1
+git -C "$tmpf2" init -q
+git -C "$tmpf2" add -A
+git -C "$tmpf2" commit -q -m "baseline"
+
+"$RATCHET" once "$tmpf2" -v -m fake/model --agent-cmd "$FAKE" >"$tmpf2/run.log" 2>&1
+if ! grep -q 'invoking.*--no-extensions' "$tmpf2/run.log"; then
+  ok "FANOUT=scout + hard: --no-extensions dropped"
+else
+  fail "FANOUT=scout + hard: --no-extensions still present (see $tmpf2/run.log)"
+fi
+# Check env export - fake-agent echoes env vars if they're set
+if grep -q 'RATCHET_FANOUT=scout' "$tmpf2/run.log" && grep -q 'RATCHET_SCOUT_MODELS=fake/scout' "$tmpf2/run.log"; then
+  ok "FANOUT=scout + hard: env vars exported"
+else
+  fail "FANOUT=scout + hard: env vars not exported (see $tmpf2/run.log)"
+fi
+rm -rf "$tmpf2"
+
+# Test (c): FANOUT=scout + (normal) task → still --no-extensions (gating proof)
+tmpf3="$(mktemp -d)"
+cat > "$tmpf3/PLAN.md" <<'EOF'
+# Test plan
+- [ ] T1 (normal) normal task
+EOF
+cat > "$tmpf3/verify.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$tmpf3/verify.sh"
+cat > "$tmpf3/.ratchet.conf" <<'EOF'
+RATCHET_PROTOCOL=1
+TRACKER_FILE=PLAN.md
+VERIFY_CMD=./verify.sh
+FANOUT=scout
+LIGHT_MODELS=fake/scout
+EOF
+"$RATCHET" init "$tmpf3" >/dev/null 2>&1
+git -C "$tmpf3" init -q
+git -C "$tmpf3" add -A
+git -C "$tmpf3" commit -q -m "baseline"
+
+"$RATCHET" once "$tmpf3" -v -m fake/model --agent-cmd "$FAKE" >"$tmpf3/run.log" 2>&1
+if grep -q 'invoking.*--no-extensions' "$tmpf3/run.log"; then
+  ok "FANOUT=scout + normal: --no-extensions still present (gating proof)"
+else
+  fail "FANOUT=scout + normal: --no-extensions dropped incorrectly (see $tmpf3/run.log)"
+fi
+rm -rf "$tmpf3"
 
 echo ""
 echo "selftest: $PASS passed, $FAIL failed"

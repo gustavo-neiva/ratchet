@@ -208,7 +208,7 @@ cmd_plan() {
 
   emit "plan turn 1 | tier=plan | model=$model | thinking=$tier_think"
   local turn_start=$SECONDS
-  run_turn "$model"
+  run_turn "$model" "normal"
   emit "plan turn 1 end | class=$TURN_STATUS | took=$((SECONDS-turn_start))s"
   show_excerpt
 
@@ -239,6 +239,111 @@ plan_commit() {
   fi
 }
 
+# ----------------------------- ratchet status --------------------------------
+# One-shot snapshot of a running or finished loop (complement to --watch).
+# Reads loop.log + tracker + last_turn.out, checks loop.pid for liveness.
+cmd_status() {
+  local log="$LOOP_LOG" tracker="$REPO_DIR/$TRACKER_FILE" turn_out="$TURN_OUT" pid_file="$LOG_DIR/loop.pid"
+  
+  if [ ! -f "$log" ]; then
+    echo "status: no loop.log found at $log (nothing run here yet?)"
+    return 1
+  fi
+  
+  # Parse loop.log for turn info (last turn line)
+  local turn_line turn_num tier model thinking task
+  turn_line=$(grep -E '^\[[^]]+\] turn [0-9]+ \| tier=' "$log" 2>/dev/null | tail -n1)
+  if [ -n "$turn_line" ]; then
+    turn_num=$(echo "$turn_line" | sed -nE 's/.*turn ([0-9]+) .*/\1/p')
+    tier=$(echo "$turn_line" | sed -nE 's/.*tier=([^|[:space:]]+).*/\1/p')
+    model=$(echo "$turn_line" | sed -nE 's/.*model=([^|[:space:]]+).*/\1/p')
+    thinking=$(echo "$turn_line" | sed -nE 's/.*thinking=([^|[:space:]]+).*/\1/p')
+    task=$(echo "$turn_line" | sed -nE 's/.*task=([^$]+)$/\1/p' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  else
+    # Fallback: old format without tier
+    turn_line=$(grep -E '^\[[^]]+\] --- turn [0-9]+ \| model=' "$log" 2>/dev/null | tail -n1)
+    if [ -n "$turn_line" ]; then
+      turn_num=$(echo "$turn_line" | sed -nE 's/.*turn ([0-9]+) .*/\1/p')
+      model=$(echo "$turn_line" | sed -nE 's/.*model=([^-[:space:]]+).*/\1/p')
+      tier="—"; thinking="—"; task="—"
+    else
+      turn_num="—"; tier="—"; model="—"; thinking="—"; task="—"
+    fi
+  fi
+  
+  # Parse for elapsed/took time
+  local elapsed_took
+  local end_line took_s
+  end_line=$(grep -E '^\[[^]]+\] turn [0-9]+ end \| class=' "$log" 2>/dev/null | tail -n1)
+  if [ -n "$end_line" ]; then
+    # Check if this is the same turn (finished)
+    local end_turn; end_turn=$(echo "$end_line" | sed -nE 's/.*turn ([0-9]+) end.*/\1/p')
+    if [ "$end_turn" = "$turn_num" ]; then
+      took_s=$(echo "$end_line" | sed -nE 's/.*took=([0-9]+)s.*/\1/p')
+      [ -n "$took_s" ] && elapsed_took="took ${took_s}s" || elapsed_took="finished"
+    else
+      # Turn started but not finished → running
+      elapsed_took="running"
+    fi
+  else
+    elapsed_took="running"
+  fi
+  
+  # Tasks done/total from tracker
+  local done_n open_n total_n
+  if [ -f "$tracker" ]; then
+    done_n=$(grep -cE '^[[:space:]]*-?[[:space:]]*\[x\]' "$tracker" 2>/dev/null || echo 0)
+    open_n=$(grep -cE '^[[:space:]]*-?[[:space:]]*\[( |IN PROGRESS)\]' "$tracker" 2>/dev/null || echo 0)
+    total_n=$((done_n + open_n))
+  else
+    done_n="?"; open_n="?"; total_n="?"
+  fi
+  
+  # Loop liveness from PID file
+  local loop_status
+  if [ -f "$pid_file" ]; then
+    local pid; pid=$(cat "$pid_file" 2>/dev/null)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      loop_status="running (pid $pid)"
+    else
+      loop_status="not running (stale pid $pid)"
+    fi
+  else
+    loop_status="not running"
+  fi
+  
+  # Print status
+  echo "ratchet status: $REPO_DIR"
+  echo "  turn        : ${turn_num:-—}"
+  echo "  task        : ${task:-—}"
+  echo "  tier/model  : $tier / $model (thinking=$thinking)"
+  echo "  status      : $elapsed_took"
+  echo "  progress    : $done_n done / $total_n total"
+  echo "  loop        : $loop_status"
+  
+  # Last 5 output lines from last_turn.out
+  if [ -f "$turn_out" ] && [ -s "$turn_out" ]; then
+    echo "  last output :"
+    # Handle JSON streaming format or plain text
+    if head -c 32 "$turn_out" 2>/dev/null | grep -q '^{"type":"session"'; then
+      # JSON streaming: extract text_delta fragments
+      local joined
+      joined=$(grep '"type":"text_delta"' "$turn_out" 2>/dev/null \
+        | sed -e 's/.*"delta":"//' -e 's/","partial.*//' \
+        | awk '{printf "%s", $0}' \
+        | sed -e 's/\\"/"/g')
+      printf '%b\n' "$joined" | grep -v '^[[:space:]]*$' | tail -n5 | sed 's/^/    /'
+    else
+      # Plain text
+      tail -n5 "$turn_out" 2>/dev/null | sed 's/^/    /'
+    fi
+  else
+    echo "  last output : (no output yet)"
+  fi
+  echo "---"
+  echo "log: $log"
+}
+
 # ----------------------------- ratchet doctor --------------------------------
 # Fast static checks (<1s, auto before every run) + optional deep checks.
 cmd_doctor() {
@@ -248,6 +353,17 @@ cmd_doctor() {
   pr_fail() { printf '  FAIL %s\n' "$1"; problems=$((problems+1)); }
 
   printf 'doctor: %s\n' "$dir"
+
+  # Check for mid-operation state
+  if [ -d "$dir/.git/rebase-merge" ]; then
+    pr_fail "repo is mid-rebase (interactive) — use 'git rebase --quit' to keep commits or 'git rebase --abort' to discard"
+  elif [ -d "$dir/.git/rebase-apply" ]; then
+    pr_fail "repo is mid-rebase (apply) — use 'git rebase --quit' or 'git am --abort'"
+  elif [ -f "$dir/.git/MERGE_HEAD" ]; then
+    pr_fail "repo is mid-merge — resolve conflicts and commit, or 'git merge --abort'"
+  elif [ -f "$dir/.git/CHERRY_PICK_HEAD" ]; then
+    pr_fail "repo is mid-cherry-pick — resolve and commit, or 'git cherry-pick --abort'"
+  fi
 
   # git repo
   [ -d "$dir/.git" ] && pr_ok "git repo" || pr_fail "not a git repo"

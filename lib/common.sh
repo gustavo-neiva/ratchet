@@ -26,6 +26,7 @@ TURN_TIMEOUT=1800               # max wall-clock seconds for ONE agent turn (han
 STALL_TIMEOUT=300               # kill a turn whose output stops growing this long (streaming agents only)
 SHORT_SLEEP=10                  # seconds between normal turns
 MAX_TRANSIENT=3                 # consecutive transient/hard failures before a model is benched
+MAX_DONE_GATE_FAILS=3           # consecutive ALL_DONE turns blocked at the commit gate before the loop stops for human review (a done agent can't self-repair a structural gate failure)
 COOLDOWN=14400                  # seconds a benched model is skipped (≈ common daily-quota refresh)
 BOTH_WAIT=14400                 # seconds to wait when ALL models are benched, then reset
 
@@ -53,6 +54,9 @@ LIGHT_MODELS=""                 # comma-separated chain for trivial tasks (unset
 THINKING_PLAN=""                # thinking level for PLAN tier (unset → THINKING)
 THINKING_BUILD=""               # thinking level for BUILD tier (unset → THINKING)
 THINKING_LIGHT=""               # thinking level for LIGHT tier (unset → THINKING)
+
+# --- fanout strategy (v1.1, default off) ---
+FANOUT=""                       # off|scout|scout+review (empty = off). Enables subagent tool on (hard) tasks.
 
 # --- token economy (quota saving) ---
 RESUME_SESSION=0                # 0 = EPHEMERAL turns (tracker = memory, cheap). 1 = resume one session.

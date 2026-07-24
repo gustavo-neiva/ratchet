@@ -95,3 +95,51 @@ tracker_next_tag() {
   [ -z "$tag" ] && tag="normal"
   echo "$tag"
 }
+
+# tracker_next_id_and_text -> echoes "id (tag) text" for the next task (first 60 chars of text).
+# For tagged task with id: "T2.1 (hard) implement the parser..."
+# For tagged task without id: "? (normal) do the thing..."
+# For untagged task: "? (normal) do the thing..."
+# Used for turn header observability.
+tracker_next_id_and_text() {
+  local file="$REPO_DIR/$TRACKER_FILE" line id tag text_with_tag text_clean
+  [ -f "$file" ] || { echo "? (normal) "; return; }
+  
+  # Find the first [IN PROGRESS] task, else the first [ ] task
+  line=$(tracker_next inprogress)
+  [ -z "$line" ] && line=$(tracker_next open)
+  [ -z "$line" ] && { echo "? (normal) "; return; }
+  
+  # Strip line number prefix from tracker_next output (format: "123:- [ ] ...")
+  line=$(echo "$line" | sed -E 's/^[0-9]+://')
+  
+  # Strip the status marker: - [ ] or - [IN PROGRESS]
+  line=$(echo "$line" | sed -E 's/^[[:space:]]*-?[[:space:]]*\[[^]]*\][[:space:]]*//')
+  
+  # Extract tag (trivial|normal|hard) - use non-greedy match to get FIRST occurrence
+  tag=$(echo "$line" | sed -nE 's/^[^(]*\((trivial|normal|hard)[,)].*$/\1/p')
+  [ -z "$tag" ] && tag="normal"
+  
+  # Try to extract id: must be a T-prefixed token OR be followed by parentheses
+  # Examples: "T1.2 (hard) text" -> id=T1.2
+  #           "do the thing" -> id=?
+  #           "T5.1 text" -> id=T5.1 (even without parens, T-prefix signals an id)
+  if echo "$line" | grep -qE '^T[0-9]+\.[0-9]+[[:space:]]'; then
+    # T-prefixed id exists
+    id=$(echo "$line" | sed -E 's/^(T[0-9]+\.[0-9]+).*/\1/')
+  else
+    id="?"
+  fi
+  
+  # Extract text: remove id (if T-prefixed), remove tag parens, trim
+  text_with_tag="$line"
+  if [ "$id" != "?" ]; then
+    text_with_tag=$(echo "$line" | sed -E "s/^$id[[:space:]]+//")
+  fi
+  text_clean=$(echo "$text_with_tag" | sed -E 's/[[:space:]]*\([^)]*\)[[:space:]]*/ /' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+  
+  # Truncate text to 60 chars
+  text_clean=$(printf '%.60s' "$text_clean")
+  
+  echo "$id ($tag) $text_clean"
+}

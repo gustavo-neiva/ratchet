@@ -21,6 +21,10 @@ PLAN="${TRACKER_FILE:-PLAN.md}"
 # --no-session, --no-extensions, --session-id, -p <prompt>): we ignore them all.
 # (the work does not depend on the prompt — it is deterministic per the tracker)
 
+# Echo FANOUT env vars if set (for selftest verification)
+[ -n "${RATCHET_FANOUT:-}" ] && echo "RATCHET_FANOUT=$RATCHET_FANOUT" >&2
+[ -n "${RATCHET_SCOUT_MODELS:-}" ] && echo "RATCHET_SCOUT_MODELS=$RATCHET_SCOUT_MODELS" >&2
+
 python3 - "$PLAN" "$STEP" "$DONE" <<'PY'
 import sys, re
 plan, step, done = sys.argv[1], sys.argv[2], sys.argv[3]

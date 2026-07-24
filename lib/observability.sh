@@ -88,7 +88,8 @@ watch_session() {
 
 # cmd_stats -> parse loop.log into the baseline metrics (step-success rate,
 # wasted wall-hours per 100 turns, % turns on the cheap/first model, plus per-tier
-# and per-model counts from the `turn N | tier=X | model=Y` log lines.
+# and per-model counts from the `turn N | tier=X | model=Y` log lines, and avg/max
+# turn duration from `took=` lines.
 cmd_stats() {
   [ -f "$LOOP_LOG" ] || die "no loop.log found at $LOOP_LOG (nothing run here yet?)"
   command -v python3 >/dev/null 2>&1 || die "stats requires python3"
@@ -99,10 +100,11 @@ path, cheap_model = sys.argv[1], sys.argv[2]
 ts_re = re.compile(r'^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] (.*)$')
 turn_re = re.compile(r'^--- turn (\d+) \| model=(\S+) ---$')
 tier_re = re.compile(r'^turn (\d+) \| tier=(\S+) \| model=(\S+) \| thinking=(\S+)$')
+took_re = re.compile(r'turn \d+ end \| class=\S+ \| took=(\d+)s')
 def parse_ts(s): return datetime.datetime.strptime(s, '%Y-%m-%d %H:%M:%S')
 turns=cheap=steps=dones=dl_kills=exhausted=hard=transient=timeout=0
 wasted=0.0; cur_ts=None; benched_ts=None
-tier_counts={}; model_counts={}
+tier_counts={}; model_counts={}; durations=[]
 with open(path, encoding='utf-8', errors='replace') as fh:
     for raw in fh:
         m=ts_re.match(raw.rstrip('\n'))
@@ -120,6 +122,10 @@ with open(path, encoding='utf-8', errors='replace') as fh:
             tier=tr.group(2); model=tr.group(3)
             tier_counts[tier]=tier_counts.get(tier,0)+1
             model_counts[model]=model_counts.get(model,0)+1
+            continue
+        tk=took_re.search(rest)
+        if tk:
+            durations.append(int(tk.group(1)))
             continue
         if 'terminating' in rest and 'deadline' in rest:
             dl_kills+=1
@@ -146,5 +152,8 @@ if tier_counts:
     print(f"turns by tier         : {', '.join(f'{k}={v}' for k,v in sorted(tier_counts.items()))}")
 if model_counts:
     print(f"turns by model        : {', '.join(f'{k}={v}' for k,v in sorted(model_counts.items()))}")
+if durations:
+    avg=sum(durations)/len(durations); mx=max(durations)
+    print(f"turn duration         : avg={avg:.0f}s max={mx}s")
 PY
 }

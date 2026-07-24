@@ -37,7 +37,7 @@ pre_scan() {
       -p|--prompt|-s|--session|-m|--models|--thinking|--turn-timeout|--cooldown|\
       --both-wait|--step-token|--done-token|--verify-cmd|--agent-cmd|\
       --cache-retention|--tail|--heartbeat) shift 2;;
-      init|new|plan|doctor|run|once|selftest|stats|watch)
+      init|new|plan|doctor|run|once|selftest|stats|watch|status)
         [ -z "$COMMAND" ] && COMMAND="$1"; shift;;
       -*) shift;;
       *)
@@ -87,7 +87,7 @@ parse_args() {
       -v|--verbose)     VERBOSE=1; shift;;
       -h|--help)        usage; exit 0;;
       --) shift; break;;
-      init|new|plan|doctor|run|once|selftest|stats|watch) COMMAND="$1"; shift;;
+      init|new|plan|doctor|run|once|selftest|stats|watch|status) COMMAND="$1"; shift;;
       -*) die "unknown option: $1 (see --help)";;
       *)
         if [ "$COMMAND" = "new" ] && [ -z "$PROMPT_OVERRIDE" ]; then
@@ -173,6 +173,7 @@ main() {
     doctor)  cmd_doctor "$REPO_DIR" 0; exit $? ;;
     stats)   init_models "$MODELS"; cmd_stats; exit $? ;;
     watch)   init_models "$MODELS"; watch_session; exit $? ;;
+    status)  cmd_status; exit $? ;;
   esac
 
   # run / once: doctor preflight first (fail before the first turn, not turn 3).
@@ -222,13 +223,16 @@ main() {
 
   cd "$REPO_DIR" || die "cannot cd into $REPO_DIR"
 
+  # Write PID file (for `ratchet status` to check if the loop is alive)
+  echo $$ > "$LOG_DIR/loop.pid"
+
   # leftover staged changes (e.g. a previous run killed mid-gate) ride the next
   # green-gated commit — safe, but never silent.
   if [ -d .git ] && ! git diff --cached --quiet 2>/dev/null; then
     emit "WARNING: staged changes detected at startup (previous killed run?) — they will ride the next green-gated commit."
   fi
 
-  local turn=0 current_tier="" current_tier_chain=""
+  local turn=0 current_tier="" current_tier_chain="" done_gate_fails=0
   while true; do
     turn=$((turn+1))
     
@@ -293,20 +297,30 @@ The current tracker task is: $next_task
     fi
 
     emit "--- turn $turn | model=$model ---"
-    emit "turn $turn | tier=$tier | model=$model | thinking=$tier_thinking"
+    local task_info; task_info=$(tracker_next_id_and_text)
+    emit "turn $turn | tier=$tier | model=$model | thinking=$tier_thinking | task=$task_info"
 
     local turn_start=$SECONDS
-    run_turn "$model"
+    run_turn "$model" "$tag"
     emit "turn $turn end | class=$TURN_STATUS | took=$((SECONDS-turn_start))s | task=$(printf '%.20s' "${next_task:-?}")"
     show_excerpt
 
     case "$TURN_STATUS" in
       done)
         if ! commit_turn "$turn" "$model"; then
-          emit "DONE turn was RED at commit gate — treating as repair-needed, not complete."
+          done_gate_fails=$((done_gate_fails+1))
+          emit "DONE turn was RED at commit gate — treating as repair-needed, not complete (${done_gate_fails}/${MAX_DONE_GATE_FAILS})."
           [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
+          # The agent already thinks all work is done, so it cannot self-repair a
+          # gate it structurally can't pass (e.g. a secret-scan false positive).
+          # Stop after a bound instead of spinning forever; hand off to a human.
+          if [ "$done_gate_fails" -ge "$MAX_DONE_GATE_FAILS" ]; then
+            emit "ALL_DONE but commit gate stayed RED for $MAX_DONE_GATE_FAILS turns — STOPPING for human review (see $LOOP_LOG)."
+            break
+          fi
           sleep "$SHORT_SLEEP"; continue
         fi
+        done_gate_fails=0
         emit "agent signaled $DONE_TOKEN — all work complete."
         emit "final model used: $model"
         maybe_push_or_pr

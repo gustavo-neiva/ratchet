@@ -21,6 +21,19 @@ exactly ONE discrete step of work, then hand control back.
 Tracker grammar: status `[ ]` open · `[IN PROGRESS]` · `[x]` done, plus an
 optional id and optional tags `(trivial|normal|hard)` and/or `serial`. Example:
 `- [ ] T1.2 (normal, serial) design the schema`.
+
+## Fanout strategy (hard tasks only)
+
+When `RATCHET_FANOUT != off` and your current task is tagged `(hard)`:
+
+1. **Scout** (≤3 read-only subagents on `$RATCHET_SCOUT_MODELS`): spawn scouts to
+   map blast radius, find reuse patterns, and assess coverage. Scouts read only.
+2. **Implement**: YOU write the ONE implementation — subagents advise, you decide.
+3. **Review** (if `RATCHET_FANOUT=scout+review`, ≤2 advisory reviewers): spawn
+   reviewers to critique your implementation. Reviewers advise, YOU decide whether
+   to revise. The green gate (`{{VERIFY_CMD}}`) is the only real gate.
+
+**Subagents never run git commands** — only ratchet commits.
 <!-- ratchet-protocol:v1:end -->
 
 ## Project notes

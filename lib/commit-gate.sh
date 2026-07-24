@@ -23,7 +23,13 @@ SECRET_BLOCK_REASON=""
 builtin_secret_scan() {
   SECRET_BLOCK_REASON=""
   local diff pat
-  diff="$(git diff --cached 2>/dev/null)"
+  # Only scan ADDED lines (leading '+', excluding the '+++' file header). Context
+  # and removed lines are NOT being introduced by this commit, and scanning them
+  # false-positives on any file that legitimately documents/tests a secret shape
+  # (e.g. this scanner's own regression fixtures) — which dead-locks the loop.
+  # An added line carrying the inline marker `ratchet:allow-secret` is exempt
+  # (gitleaks-style allowlist) so test fixtures / docs can hold a secret SHAPE.
+  diff="$(git diff --cached 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+ ' | grep -v 'ratchet:allow-secret')"
   [ -n "$diff" ] || return 0
   # patterns: private key headers, AWS keys, OpenAI/Anthropic-style sk-/sk-ant,
   # generic api_key/secret assignments, JWTs, .env file additions.
