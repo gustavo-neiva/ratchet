@@ -169,14 +169,18 @@ Free throughput not currently used. **Do this first.** (Same-repo parallel tasks
 
 ```bash
 # Clone
-git clone https://github.com/YOUR_USERNAME/ratchet.git
+git clone https://github.com/gustavo-neiva/ratchet.git
 cd ratchet
 
-# Put bin/ratchet on PATH (or use ./bin/ratchet)
+# Install globally: symlink onto PATH (bin/ratchet self-locates lib/ through
+# the symlink, so the clone can live anywhere and still be updated with git pull)
+ln -sf "$PWD/bin/ratchet" /usr/local/bin/ratchet   # or ~/.local/bin/ratchet
+
+# ...or just add bin/ to PATH for this shell only
 export PATH="$PWD/bin:$PATH"
 
 # Test
-ratchet --selftest
+ratchet selftest
 ```
 
 **Requirements:**[^deps]

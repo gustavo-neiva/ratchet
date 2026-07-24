@@ -12,8 +12,17 @@
 # =============================================================================
 set -o pipefail
 
-# locate this script's repo root so lib/ + templates/ resolve regardless of CWD.
-RATCHET_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# locate this script's repo root so lib/ + templates/ resolve regardless of CWD
+# AND regardless of being invoked through a symlink on PATH (the normal install).
+# Resolve the symlink chain by hand — `readlink -f` is GNU-only (absent on macOS).
+_src="${BASH_SOURCE[0]}"
+while [ -h "$_src" ]; do
+  _dir="$(cd -P "$(dirname "$_src")" && pwd)"
+  _src="$(readlink "$_src")"
+  case "$_src" in /*) ;; *) _src="$_dir/$_src";; esac   # relative link -> absolute
+done
+RATCHET_ROOT="$(cd -P "$(dirname "$_src")/.." && pwd)"
+unset _src _dir
 export RATCHET_ROOT
 
 for _mod in common contract tracker classify model-fallback \
