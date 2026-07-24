@@ -45,6 +45,40 @@ STEP_TOKEN="STEP_COMPLETE"; DONE_TOKEN="ALL_DONE"
 . "$RR/lib/model-fallback.sh"     # tier routing
 . "$RR/lib/commands.sh"           # cmd_status
 . "$RR/lib/models.sh"             # ratchet models (chain ops, upsert, registry)
+. "$RR/lib/render.sh"             # pure render functions
+
+echo "== suite 0: render (pure terminal functions) =="
+check_bar() {  # NAME PCT WIDTH EXPECTED
+  local name="$1" pct="$2" w="$3" exp="$4" got
+  got="$(render_bar "$pct" "$w")"
+  [ "$got" = "$exp" ] && ok "$name" || fail "$name -> got='$got' want='$exp'"
+}
+check_bar "render_bar 0% empty" 0 5 "░░░░░"
+check_bar "render_bar 50% half" 50 10 "▓▓▓▓▓░░░░░"
+check_bar "render_bar 63% six-of-ten" 63 10 "▓▓▓▓▓▓░░░░"
+check_bar "render_bar 100% full" 100 5 "▓▓▓▓▓"
+check_bar "render_bar clamp-low" -10 5 "░░░░░"
+check_bar "render_bar clamp-high" 150 5 "▓▓▓▓▓"
+
+# ansi_ok returns 0 only when stdout is a TTY AND NO_COLOR is unset
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  ansi_ok && ok "ansi_ok returns 0 on TTY without NO_COLOR" || fail "ansi_ok false-negative"
+else
+  ansi_ok && fail "ansi_ok false-positive (non-TTY or NO_COLOR set)" || ok "ansi_ok correctly returns 1"
+fi
+
+# render_activity maps event types to human verbs
+check_activity() {  # NAME EVENTTYPE EXPECTED
+  local name="$1" evt="$2" exp="$3" got
+  got="$(render_activity "$evt")"
+  [ "$got" = "$exp" ] && ok "$name" || fail "$name -> got='$got' want='$exp'"
+}
+check_activity "render_activity turn_start" "turn_start" "thinking"
+check_activity "render_activity tool_execution_update" "tool_execution_update" "working"
+check_activity "render_activity tool_call" "tool_call" "running a tool"
+check_activity "render_activity toolCall" "toolCall" "running a tool"
+check_activity "render_activity unknown" "some_random_event" "some_random_event"
+check_activity "render_activity empty" "" "working"
 
 echo "== suite 1: turn classification =="
 check_class() {  # NAME EXPECTED STRING

@@ -1,141 +1,308 @@
-# PLAN.md — ratchet builds ratchet: tiered model routing (v1.1)
+# PLAN.md — ratchet: a project-management terminal UI (readable, PM-grade run view)
+
+> The prior plan (tiered model routing v1.1) is COMPLETE and preserved in git
+> history. This plan replaces the tracker with the UI overhaul. Run with
+> `bin/ratchet run .` (default tracker = PLAN.md).
 
 Tracker grammar: `[ ]` open → `[IN PROGRESS]` → `[x]` done.
 Tags: `(trivial|normal|hard)` and `(serial)`.
 
-## Design constraints (read before ANY task — these are non-negotiable)
+## The problem (from a real run, 2026-07-24)
 
-1. **ZERO regressions.** The old autonomous loop worked; ratchet is its proven
-   successor. Every task must keep `bash test/selftest.sh` green (currently
-   19/19). New behavior is ONLY active when new config keys are set — with all
-   tier keys unset, the loop must behave byte-identically to today (flat
-   `MODELS` chain, single `THINKING`).
-2. **Additive only.** Do not rename, remove, or change the meaning of any
-   existing config key, function, flag, token, or log line format. New keys and
-   new functions only.
-3. **One task per turn.** Do the task, add/extend its selftest, run
-   `bash test/selftest.sh`, mark the task `[x]`, print STEP_COMPLETE.
-4. **bash 3.2 compatible** (macOS default): no associative arrays, no
-   `${var,,}`, no `mapfile`. Follow the existing style in lib/.
-5. Never edit `.ratchet.conf` (agent-forbidden; the commit gate rejects it).
-6. Discovered gotchas go in LEARNINGS.md (append-only).
+Watching a live run today you get a flat scroll of:
+- a `... working (Ns, model=X) | tool_execution_update 1762682b` line **every
+  15 seconds** — dozens per turn, ending in a meaningless byte counter;
+- a **12-line raw dump** of the agent's inner monologue after every turn;
+- machine lines (`turn N | tier=… | task=…`, `tasks: N done / M total`) that
+  scroll away and carry **no milestone position, no %, no ETA, no "what now"**.
 
-## The feature: tiered model routing
+You cannot answer the four questions a human actually has: **what step am I on,
+what is it doing now, how many steps are left, and how long until done.** This
+plan makes the terminal answer all four at a glance — a project-management
+board, not a log tail.
 
-Three model tiers, each an independent fallback chain with its own thinking
-level. Route each turn by the tag of the next actionable task:
+## The one architectural decision (read before ANY task)
 
-| Tier | Config keys | Used for | Example |
-|---|---|---|---|
-| PLAN  | `PLAN_MODELS`, `THINKING_PLAN`   | plan-drafting turns only (`ratchet plan`, `ratchet new`) | `anthropic/claude-fable-5,anthropic/claude-opus-4-8` |
-| BUILD | `BUILD_MODELS`, `THINKING_BUILD` | `normal` and `hard` tasks (heavy lifting) | `anthropic/claude-sonnet-4-5,zai/glm-5.2` |
-| LIGHT | `LIGHT_MODELS`, `THINKING_LIGHT` | `trivial` tasks (search, data collection, mechanical edits) | `zai/glm-5-turbo,zai/glm-4.5-air` with `THINKING_LIGHT=off` |
+`loop.log` is the machine record: `cmd_stats` and `cmd_status` parse its line
+**formats** (`turn N | tier=X | model=Y`, `took=Ns`, `tasks: N done / M total`).
+Those formats are **frozen**. All UI work happens in a **new terminal render
+layer** that reads the same data and prints for humans. We never trade the
+machine log for the pretty view — we add the pretty view on top.
 
-Fallback semantics (conservative): any tier key unset → that tier falls back to
-the flat `MODELS` chain and global `THINKING`. Tier chain fully benched → fall
-back to `MODELS` before sleeping `BOTH_WAIT`. `hard` tasks use the BUILD chain
-but bump thinking one notch above `THINKING_BUILD` (max `high`) unless
-`THINKING_BUILD` is explicitly set.
+## Design constraints (read before ANY task — non-negotiable)
 
-## Milestone 0 — safety net first (serial)
+1. **loop.log formats are frozen (additive only).** Never change, rename, or
+   reorder any existing emitted line that `cmd_stats`/`cmd_status` parse. New
+   *terminal* rendering may look however it needs to; the log line it derives
+   from must still be written verbatim. `stats`/`status` on OLD logs must not
+   break.
+2. **Zero new deps for the loop core.** bash 3.2 (macOS default): no
+   associative arrays, no `${var,,}`, no `mapfile`; no `timeout` binary. Render
+   is pure bash + `awk`/`sed`. `ratchet status` may use `python3` (already a
+   `stats` dependency) but prefer awk.
+3. **Render functions are PURE.** Every `render_*` takes inputs as args or
+   stdin and prints a string — no globals read, no files touched, no side
+   effects. This is what makes them selftestable with NO agent and NO live loop.
+4. **Color is optional and safe.** Emit ANSI only when stdout is a TTY and
+   `NO_COLOR` is unset; otherwise plain text. A piped/redirected run (and the
+   log) stays clean ASCII.
+5. **ETA is honestly labelled.** It is a naive `avg_turn_secs × remaining_open`
+   estimate. Always render it prefixed `~` and never present it as a promise.
+6. **One task per turn.** Do the task, add its selftest case, run
+   `bash test/selftest.sh`, mark `[x]`, print STEP_COMPLETE.
+7. Never edit `.ratchet.conf`. Discovered gotchas → LEARNINGS.md (append-only).
 
-- [x] T0.1 (trivial, serial) Baseline check: run `bash test/selftest.sh` and confirm 19/19 pass. Fix nothing else. Record the count in LEARNINGS.md.
-- [x] T0.2 (normal, serial) Parity audit: read `/Users/gustavo-neiva/Code/archive/pi-autoloop/autonomous_loop.sh` (the battle-tested predecessor) and compare its behaviors against ratchet's lib/*.sh. Write `docs/parity-audit.md` listing every old-loop behavior and its ratchet equivalent (or "MISSING"). Do NOT change any code. If anything is genuinely missing, append a new `[ ]` task for it under Milestone 3 in this file.
+## What "good" looks like (the target render)
 
-## Milestone 1 — tiered routing engine (serial: all tasks touch shared files)
+Per-turn header on the terminal (log still gets its frozen machine lines):
 
-- [x] T1.1 (normal, serial) `lib/tracker.sh`: add `tracker_next_tag` — echo the tag (`trivial|normal|hard`) of the first `[IN PROGRESS]` task, else the first `[ ]` task; echo `normal` when untagged or no task. Pure addition; do not modify existing functions. Add selftest cases: tagged trivial, tagged hard, untagged, empty tracker.
-- [x] T1.2 (normal, serial) `lib/contract.sh` + `lib/common.sh`: add the six keys `PLAN_MODELS BUILD_MODELS LIGHT_MODELS THINKING_PLAN THINKING_BUILD THINKING_LIGHT` to `CONTRACT_KEYS` and as empty-string defaults in common.sh (commented like the neighbors). Add selftest: a conf file with `LIGHT_MODELS="a/b"` parses; an unknown key still errors.
-- [x] T1.3 (hard, serial) `lib/model-fallback.sh`: add `chain_for_tier TIER` — echo the effective chain for `plan|build|light` with the fallback semantics from the design table (unset tier → `$MODELS`). Add `thinking_for_tier TIER` with the same fallback (including the `hard`-bump rule handled by the caller passing tier `build-hard` → one notch above `THINKING_BUILD`, capped at `high`, only when `THINKING_BUILD` is empty use global `THINKING` untouched). Keep `init_models` working unchanged when called with `$MODELS`. Add selftest cases: unset tiers → flat chain; set tiers → correct chain; ALLOWED_PROVIDERS still filters tier chains.
-- [x] T1.4 (hard, serial) `bin/ratchet` run loop: before each turn, call `tracker_next_tag`, map tag→tier (`trivial`→light, `normal`→build, `hard`→build with thinking bump), re-`init_models "$(chain_for_tier …)"` ONLY when the tier changed since the last turn (preserve bench/cooldown state within a tier), and pass the tier thinking to `run_turn`. When the tier chain is fully benched, fall back to `init_models "$MODELS"` for that turn before ever sleeping `BOTH_WAIT`. Log one line per turn: `turn N | tier=build | model=X | thinking=Y` (keep the existing turn log line too — additive). With all tier keys unset the loop must select exactly what it selects today; add an end-to-end selftest with the fake agent proving (a) unset keys → old behavior, (b) a `(trivial)` task routes to `LIGHT_MODELS`.
-- [x] T1.5 (normal, serial) `ratchet doctor`: print the three effective tier chains and thinking levels (or "→ MODELS (flat)" when unset). Warn (not fail) when `LIGHT_MODELS` is set but `THINKING_LIGHT` is not `off` (cheap tier should not reason). Add selftest for the warning.
+```
+◐ Step 33/52  [▓▓▓▓▓▓▓░░░░░ 63%]   M5 · observability & UX  (3/6)
+  ▶ T5.4 (normal)  heartbeat shows activity          build · glm-5-turbo
+  ⏱ turn 5 · 3m42s   avg 3m00s   ~19 turns / ~57m left
+     … editing files (2m18s)
+```
 
-## Milestone 2 — plan turns on existing repos (serial)
+`ratchet status` (second terminal / `watch -n5`): the full PM board — progress
+bar, milestone tree with per-milestone mini-bars, current task, ETA, and the
+one-line "what it's doing now".
 
-- [x] T2.1 (hard, serial) `ratchet plan [REPO]` command: run ONE turn using the PLAN tier (chain_for_tier plan) with a plan-drafting prompt: read the repo, read PLAN.md, draft/refresh open tasks (Milestone-0-walking-skeleton rule, tags on every task), then STOP with a loud "HUMAN: review PLAN.md before running". Never auto-runs the loop after. Reuse the plan-turn machinery from `ratchet new` (extract shared function if needed — smallest possible refactor). Selftest with fake agent: `plan` invokes exactly one turn and does not commit code changes outside PLAN.md/LEARNINGS.md.
-- [x] T2.2 (normal, serial) `ratchet stats`: extend `cmd_stats` (the embedded python in `lib/observability.sh`) to count turns per tier and per model from the `turn N | tier=X | model=Y` log lines (old logs without tier lines must not break stats). Selftest: stats on a fixture log with and without tier lines.
+## Milestone 0 — safety net + the render seam (serial)
 
-## Milestone 3 — docs + parity follow-ups (parallel-safe)
+> No UI task runs before this is green. Bootstraps a pure, testable render
+> module and the "no green, no commit" gate for it.
 
-- [x] T3.1 (trivial) README.md: add a "Tiered model routing" section with the design table above and a copy-paste `.ratchet.conf` example (fable/opus plan, sonnet/glm build, glm-turbo light with thinking off).
-- [x] T3.2 (trivial) CHANGELOG.md: add v1.1 entry (tiered routing, `ratchet plan`, tier stats, parity audit).
-- [x] T3.3 (trivial) templates: add the six commented tier keys to the `.ratchet.conf` template stamped by `ratchet init`.
-- (T0.2 may append parity-gap tasks here.)
+- [x] T0.1 (trivial, serial) Baseline: confirm the suite is green and record the count.
+      touches: LEARNINGS.md
+      do: Run `bash test/selftest.sh`. Confirm it passes. Append one line to
+          LEARNINGS.md recording the pass count (e.g. "UI-overhaul baseline:
+          selftest N/N green"). Change no code.
+      accept:
+          Given a clean checkout
+          When `bash test/selftest.sh` runs
+          Then it exits 0 and LEARNINGS.md records the count
+      verify: bash test/selftest.sh
+      constraints: no code changes this turn.
 
-## Milestone 4 — run health & correctness (serial: found in the 2026-07-24 run postmortem)
+- [x] T0.2 (normal, serial) New pure render module + walking-skeleton test.
+      touches: lib/render.sh, bin/ratchet, test/selftest.sh
+      do: Create `lib/render.sh`. Add two pure functions: `render_bar PCT WIDTH`
+          → prints a `[▓▓▓░░░]`-style bar of WIDTH cells filled to PCT percent
+          (clamp 0–100, integer math, no globals); and `ansi_ok` → returns 0
+          only when stdout is a TTY AND `NO_COLOR` is unset (so callers gate
+          color). Source `render.sh` in `bin/ratchet`'s `_mod` loop (add
+          `render` to the list). This is the seam every later task builds on.
+      snippet:
+          render_bar() { # PCT WIDTH -> "▓▓▓░░░"
+            local pct=$1 w=$2 fill i out=''
+            [ "$pct" -lt 0 ] && pct=0; [ "$pct" -gt 100 ] && pct=100
+            fill=$(( pct * w / 100 ))
+            for i in $(seq 1 "$w"); do
+              [ "$i" -le "$fill" ] && out="$out▓" || out="$out░"; done
+            printf '%s' "$out"; }
+      accept:
+          Given render_bar 63 10
+          When it runs
+          Then it prints a 10-cell bar with 6 filled cells (63*10/100=6)
+          And render_bar 0 5 is all empty, render_bar 100 5 is all full
+      verify: bash test/selftest.sh   (new suite "render": render_bar 0/50/100/clamp cells correct)
+      constraints: pure functions only; bash 3.2; additive source line only.
 
-- [x] T4.1 (trivial, serial) Secret-scan regression test: the private-key pattern used an empty alternation `(DSA |)` that BSD grep -E rejects (`grep: empty (sub)expression`) — the check silently no-oped on EVERY commit. The regex is already fixed in `lib/commit-gate.sh`. Add selftest cases: (a) a staged diff containing `-----BEGIN OPENSSH PRIVATE KEY-----` blocks the commit, (b) a bare `-----BEGIN PRIVATE KEY-----` (no algo prefix) also blocks, (c) the gate run produces NO stderr noise (assert `grep:` never appears in gate output).
-- [x] T4.2 (normal, serial) `ratchet doctor` + run preflight: FAIL when the repo is mid-operation — `.git/rebase-merge`, `.git/rebase-apply`, `.git/MERGE_HEAD`, or `.git/CHERRY_PICK_HEAD` exists. The 2026-07-24 run committed 8 turns inside a stalled interactive rebase; one `git rebase --abort` would have destroyed them all. Selftest: fake repo with a `.git/rebase-merge` dir → doctor fails with a message naming the state and the safe exit (`--quit` vs `--abort`).
-- [x] T4.3 (trivial, serial) Startup staged-changes check: if `git diff --cached --quiet` fails at loop start, warn LOUDLY (`staged changes from a previous killed run — they will ride the next commit`). Do not block (the next green gate covers safety). Selftest: staged file at startup → warning line appears in loop.log.
+## Milestone 1 — kill the noise (serial: heartbeat + excerpt share run-turn/observability)
 
-## Milestone 5 — observability & UX (serial: all touch bin/ratchet + observability.sh)
+- [x] T1.1 (normal, serial) In-place heartbeat, human words, no byte counter.
+      touches: lib/render.sh, lib/run-turn.sh, test/selftest.sh
+      do: Add pure `render_activity EVENTTYPE` to render.sh mapping the pi json
+          stream event type to a human verb: `turn_start`→"thinking",
+          `tool_execution_update`→"working", `tool_call`→"running a tool",
+          else the raw type. In `run-turn.sh`'s heartbeat branch, STOP printing a
+          new line every tick and STOP appending `${sz}b`. Instead rewrite ONE
+          status line in place: `printf '\r\033[K  … %s (%s)' "$(render_activity
+          "$evt")" "$(fmt_dur $elapsed)"` when `ansi_ok`, else keep the current
+          newline behaviour (so logs/pipes stay clean). Print a trailing newline
+          once the turn's while-loop exits so the next emit starts on a fresh
+          line. Heartbeats are `term_only` already (never in loop.log) — keep
+          that; only the on-screen form changes.
+      snippet:
+          render_activity() { case "$1" in
+            turn_start) printf 'thinking';;
+            tool_execution_update) printf 'working';;
+            tool_call|toolCall) printf 'running a tool';;
+            *) printf '%s' "${1:-working}";; esac; }
+      accept:
+          Given a running turn emitting heartbeats to a TTY
+          When 10 heartbeats fire
+          Then the screen shows ONE line updating in place (no byte counter)
+          And render_activity tool_execution_update prints "working"
+          And with stdout non-TTY the heartbeat still prints newline-style (log-safe)
+      verify: bash test/selftest.sh   (case: render_activity mapping; assert no "b" byte-suffix in the new heartbeat format string)
+      constraints: heartbeat stays term_only (never loop.log); bash 3.2; no new deps.
 
-> Postmortem: watching a run today you can't tell WHAT task is running, HOW
-> LONG it took, WHAT the agent is doing during the 15s heartbeats, or WHAT is
-> next. All additions below are additive log lines (constraint 2 — never
-> change existing line formats; `stats` on old logs must not break).
+- [IN PROGRESS] T1.2 (normal, serial) Curate the post-turn excerpt (summary, not a 12-line dump).
+      touches: lib/render.sh, lib/observability.sh, lib/common.sh, test/selftest.sh
+      do: The agent's useful output is its FINAL summary, not its whole inner
+          monologue. Add pure `render_summary NLINES` reading the extracted
+          assistant text on stdin and printing the LAST meaningful block: drop
+          blank lines and lines that are pure tool chatter, keep the last NLINES
+          (default 4). In `show_excerpt` (observability.sh), pipe the already
+          un-escaped text through `render_summary "$SUMMARY_LINES"` instead of
+          `tail -n "$TAIL_LINES"`. Add `SUMMARY_LINES=4` default in common.sh
+          next to `TAIL_LINES` (leave TAIL_LINES for back-compat / non-json
+          agents). Change the banner label from "agent output (last 12 lines)"
+          to "summary".
+      accept:
+          Given a 40-line agent output ending in a 3-line summary
+          When show_excerpt renders it
+          Then only the trailing ~4 meaningful lines print under a "summary" header
+          And blank/whitespace-only lines are dropped
+      verify: bash test/selftest.sh   (case: render_summary keeps last 4 non-blank lines from a fixture)
+      constraints: json extraction path unchanged (reuse the existing text_delta join); additive default key.
 
-- [x] T5.1 (normal, serial) Turn header shows the work: extend the additive tier line to `turn N | tier=X | model=Y | thinking=Z | task=T2.1 (hard) <first 60 chars of task text>`. Needs `tracker_next_id_and_text` helper in `lib/tracker.sh` (pure addition next to `tracker_next_tag`). Selftest: line contains `task=` for a tagged tracker; untagged tracker → `task=? (normal)`.
-- [x] T5.2a (trivial, serial) Turn summary line: emitted after classify — `turn N end | class=step | took=222s | task=T2.1` (done by hand, selftested).
-- [x] T5.2b (normal, serial) Extend `cmd_stats` to report avg/max turn duration from the `took=` lines (old logs without them → skip section, no crash). Selftest: stats parses a fixture log with and without `took=` lines.
-- [x] T5.3 (trivial, serial) Progress line each turn: `tasks: 7 done / 14 total | next: T2.2 …` before the turn header (done by hand, selftested).
-- [x] T5.4 (normal, serial) Heartbeat shows activity: `... working (45s, model=X) | <last non-empty output line, ANSI/CR-stripped, 80ch>` (done by hand; display-only, verified visually).
-- [x] T5.5 (hard, serial) `ratchet status [REPO]` command: one-shot snapshot for a second terminal (complement to `watch` which needs --resume sessions): reads loop.log + tracker + last_turn.out → prints current/last turn number, task, model+tier, elapsed (running) or took (finished), tasks done/total, last 5 output lines, and whether the loop process is alive (pgrep on the loop pid file — write `$LOG_DIR/loop.pid` at start, additive). Selftest: status against a fixture LOG_DIR renders all fields; no pid file → `not running`.
-- [x] T5.6 (trivial, serial) `--cheap` flag: force ALL tiers to the LIGHT chain for this run (`LIGHT_MODELS` if set, else `MODELS`) — the one-word way to run the loop on the cheap model overnight: `ratchet run --cheap`. Log `cheap mode: all tiers → <chain>` in the startup banner. Document `-m/--models` next to it in `--help` as the explicit override. Selftest: `--cheap` with LIGHT_MODELS set routes a `(hard)` task to the light chain.
+## Milestone 2 — project-management header (serial: milestone parse + turn render)
 
-## Milestone 6 — strategy: fanout + proof (from docs/STRATEGY.md, human-reviewed)
+- [ ] T2.1 (normal, serial) Milestone awareness in the tracker parser.
+      touches: lib/tracker.sh, test/selftest.sh
+      do: Add `tracker_milestones` — for each `## Milestone …` (also match a
+          plain `## ` section that contains tasks) print `name<TAB>done<TAB>total`
+          counting `[x]` vs `[ ]|[IN PROGRESS]` task lines that fall under that
+          heading until the next `## `. Add `tracker_current_milestone` — echo
+          `name<TAB>idx<TAB>count<TAB>mdone<TAB>mtotal` for the milestone that
+          contains the first open/IN PROGRESS task (idx = its 1-based position
+          within that milestone). Pure reads of `$REPO_DIR/$TRACKER_FILE`; add
+          next to `tracker_next_tag` — do not touch existing functions.
+      accept:
+          Given a tracker with "## Milestone 5 …" holding 6 tasks, 3 done
+          When tracker_current_milestone runs with the first open task in M5
+          Then it echoes the M5 name, its within-milestone index, 3, and 6
+          And tracker_milestones lists every milestone with correct done/total
+      verify: bash test/selftest.sh   (fixture tracker: multi-milestone counts + current-milestone position)
+      constraints: additive functions only; grammar-compatible with untagged trackers; bash 3.2.
 
-> Decisions taken: Tier 0 = document now. Tier 1 = build behind `FANOUT` key,
-> default off, gated on `(hard)` tags, reviewers advisory-only. Tier 2 = out of
-> scope. Subagents NEVER touch git — only ratchet commits.
+- [ ] T2.2 (normal, serial) The per-turn PM status block (terminal), machine line unchanged.
+      touches: lib/render.sh, bin/ratchet, test/selftest.sh
+      do: Add pure `render_status_block DONE TOTAL MNAME MDONE MTOTAL TURN TIER
+          MODEL TASKID TASKTEXT` → the multi-line header shown in "What good
+          looks like": a `Step D/T [bar PCT%] · Mname (mdone/mtotal)` line, a
+          `▶ TASKID (…) TASKTEXT   TIER · MODEL` line. In `bin/ratchet`, keep
+          emitting the EXISTING frozen lines to the log (`tasks: … / …`,
+          `turn N | tier=…`), but ALSO render this block to the terminal via
+          `term_only` (so loop.log is untouched, constraint 1). Feed it from
+          `tracker_count_done`, the open count already computed, and
+          `tracker_current_milestone`.
+      accept:
+          Given done=33 total=52, milestone "M5 observability" 3/6, turn 5,
+                task T5.4 on build/glm-5-turbo
+          When render_status_block runs
+          Then output contains "Step 33/52", a 63% bar, "M5 observability (3/6)",
+               and "T5.4" with "build · glm-5-turbo"
+      verify: bash test/selftest.sh   (assert the block contains Step/percent/milestone/task substrings)
+      constraints: frozen log lines still emitted verbatim; block is term_only; pure render.
 
-- [x] T6.1 (trivial) README.md: document Tier 0 cross-repo parallelism (N ratchet processes on N repos via `--dir`, backgrounded + `wait`) as the free-throughput pattern. Copy the snippet from docs/STRATEGY.md §2.4.
-- [x] T6.2 (hard, serial) `FANOUT` contract key (`off|scout|scout+review`, default/empty = `off`): add to `CONTRACT_KEYS` + common.sh default. When `FANOUT != off` AND the current task tag is `hard`, `run_turn` drops `--no-extensions` (subagent tool loads) and exports `RATCHET_FANOUT`, `RATCHET_SCOUT_MODELS=$LIGHT_MODELS` env for the agent. When `off` or task not hard: byte-identical invocation to today. Selftests (the claim-guards): (a) FANOUT unset → agent invocation line contains `--no-extensions` (parity proof), (b) `FANOUT=scout` + `(hard)` task → invocation lacks `--no-extensions` and env is exported, (c) `FANOUT=scout` + `(normal)` task → still `--no-extensions` (gating proof).
-- [x] T6.3 (normal, serial) Fanout protocol block in `templates/AGENTS.protocol.md` (and the ratchet repo's own AGENTS.md): when `RATCHET_FANOUT != off` and the task is `(hard)` — spawn ≤3 read-only scouts on `$RATCHET_SCOUT_MODELS` (blast radius, reuse patterns, coverage), implement the ONE write yourself, then (if `scout+review`) ≤2 advisory reviewers; reviewers advise, YOU decide, the green gate is the only real gate. Subagents never run git commands. Selftest: template contains the block; `ratchet init` stamps it.
-- [x] T6.4 (hard, serial) Benchmark harness `test/bench.sh` (not in selftest; run manually + before releases) — makes the speed/efficiency claims falsifiable: with the fake agent, measure (a) token-seen → turn-end latency (claim: early-kill fires within one 3s poll + kill grace; assert < 10s), (b) wall-clock of a 3-task run, (c) turns-on-cheap-model % from stats. Prints a comparison table vs a committed `test/bench-baseline.txt`; exits nonzero on >20% regression of (a) or (b). This is the regression tripwire for 'faster/more efficient'.
-- [x] T6.5 (normal) One `FANOUT=scout` A/B experiment on a real `(hard)` task: run the same task once with `FANOUT=off` and once with `scout`, record wall-clock + token cost in LEARNINGS.md. If scout is not clearly better, keep the key but note the finding — do NOT default it on.
-- [x] T6.6 (trivial) docs/comparison.md: the §1.2 competitor table from docs/STRATEGY.md (looper, loop-harness, ouro-loop), one paragraph per differentiator. Link from README.
-- [x] T6.7 (trivial) README repositioning: lead with 'survives provider rate limits + never commits a red tree'; add the 'zero deps' footnote (loop core is bash-only; `stats` needs python3, `watch` prefers jq).
+## Milestone 3 — timing & ETA (serial: both touch observability + render)
 
-## Milestone 7 — model config UX (`ratchet models`) (done by hand, 2026-07-24)
+- [ ] T3.1 (normal, serial) Turn-duration average + ETA math.
+      touches: lib/observability.sh, lib/render.sh, test/selftest.sh
+      do: Add `avg_turn_secs LOGFILE` — awk the `took=(\d+)s` lines to a mean
+          integer (echo 0 if none; old logs without `took=` must not error).
+          Add pure `fmt_dur SECS` (→ `57m`, `1h20m`, `42s`) and pure
+          `render_eta REMAINING AVGSECS` (→ `~19 turns / ~57m left`; if avg=0 →
+          `ETA unknown`). Reuse `fmt_dur` for the heartbeat elapsed too.
+      accept:
+          Given a log with took=180,took=240,took=120
+          When avg_turn_secs runs
+          Then it echoes 180
+          And render_eta 19 180 contains "~19 turns" and "~57m"
+          And a log with no took= lines yields avg 0 → render_eta … "ETA unknown"
+      verify: bash test/selftest.sh   (fixture logs: with and without took= lines)
+      constraints: additive; awk not python; tolerate malformed/old logs.
 
-> Pain: model ids churn (3 providers, weekly renames); chains were hand-typed
-> comma strings in the global conf + N repo confs with zero validation — typos
-> surfaced as burned turns. TUI deferred (ponytail: the CLI covers it).
+- [ ] T3.2 (normal, serial) Wire ETA into the status block and the turn-end terminal line.
+      touches: lib/render.sh, bin/ratchet, test/selftest.sh
+      do: Extend `render_status_block` (or add a `render_timing TURN ELAPSED AVG
+          REMAINING` line the block appends) to show
+          `⏱ turn N · <dur>   avg <dur>   <render_eta>`. In `bin/ratchet`,
+          compute `remaining = open task count`, `avg = avg_turn_secs
+          "$LOOP_LOG"`, and render the timing line to the terminal (term_only)
+          after the frozen `turn N end | … took=…` machine line. The machine
+          `took=` line stays byte-identical (constraint 1).
+      accept:
+          Given avg 180s and 19 open tasks after a 222s turn
+          When the turn-end terminal render runs
+          Then it shows "turn N · 3m42s", "avg 3m00s", and "~57m left"
+          And loop.log still contains the unchanged "turn N end | class=… | took=222s" line
+      verify: bash test/selftest.sh   (render_timing substrings; grep the frozen took= line still present)
+      constraints: frozen log line untouched; ETA prefixed `~`; term_only render.
 
-- [x] T7.1 (normal, serial) `lib/models.sh` + `ratchet models list|add|remove|thinking`: chain ops (`chain_add` doubles as move), conf upsert preserving comments, `--tier/--pos/--repo/--force`, validated against `pi --list-models` (24h cache — the call costs ~3s, too slow for uncached doctor use). `--repo` re-stamps the doctor conf-hash. Selftest suite 17 (21 cases). 118/118.
-- [x] T7.2 (trivial, serial) `ratchet doctor`: FAIL on configured ids missing from the registry cache (typo/churn guard at preflight); skips cleanly when the cache is missing/stale.
-- [ ] T7.3 (trivial) `ratchet models sync`: scan confs for churned ids, suggest replacements by prefix. YAGNI until the first real rename hurts.
+## Milestone 4 — the `ratchet status` PM board (serial: rewrites cmd_status render)
 
-## How to finish this plan (dogfood — ratchet builds ratchet)
+- [ ] T4.1 (hard, serial) Rewrite `cmd_status` output into a project-management board.
+      touches: lib/commands.sh, test/selftest.sh
+      do: Keep every field `cmd_status` already parses (turn, task, tier/model,
+          elapsed/took, done/total, loop liveness, last output) — this is a
+          RENDER change, not a data change. Replace the flat key/value print
+          with: a header (repo + loop-alive dot), `render_bar` progress with
+          `Step D/T (PCT%)`, a milestone tree from `tracker_milestones` (each
+          `name  mini-bar  mdone/mtotal`, current one marked `▶`), the current
+          task + tier/model + elapsed, `render_eta` from `avg_turn_secs`, and a
+          single "doing now" line from the last heartbeat-equivalent (last
+          meaningful line of last_turn.out via `render_activity`/`render_summary
+          1`). Use `ansi_ok` for color. This is the board a human keeps open in
+          a 2nd terminal (`watch -n5 bin/ratchet status .`).
+      accept:
+          Given a fixture LOG_DIR + multi-milestone tracker
+          When `ratchet status` runs
+          Then output shows a progress bar with Step D/T, a milestone tree with
+               per-milestone counts, the current task marked ▶, an ETA line, and
+               a loop-alive indicator
+          And with no pid file it still reports "not running"
+      verify: bash test/selftest.sh   (extend the existing status suite: assert bar, milestone tree, ETA, current-marker present)
+      constraints: reuse render_* + tracker_milestones; no new deps beyond existing (python3 optional); keep all parsed fields.
 
-Everything still open is loop-work. Order is top-down as written: M2 (plan
-command + stats) → M3 (docs) → M4 (T4.2 doctor mid-rebase guard) → M5
-(observability: task-in-header, took=, progress, heartbeat activity, `status`)
-→ M6 (FANOUT + bench + positioning docs). M5 lands the UI/UX you'll use to
-WATCH the expensive M6 tasks run — do not reorder M6 before M5.
+- [ ] T4.2 (trivial) Document the live board.
+      touches: README.md
+      do: In the observability section, add `watch -n5 bin/ratchet status .` as
+          the live PM board (native `watch`, zero new deps) and show a sample of
+          the new board + turn header. One short subsection.
+      accept:
+          Given the README observability section
+          When a reader looks for "how do I watch a run like a project"
+          Then they find the `watch -n5 … status` one-liner and a sample board
+      verify: bash test/selftest.sh   (agnosticism grep-check still green; doc-only)
+      constraints: doc-only; no project-specific knowledge that would trip the agnosticism grep.
 
-From the repo root:
+## Milestone 5 — docs + polish (parallel-safe)
 
-    bin/ratchet run .                  # full run on the conf's MODELS/tier chains
-    bin/ratchet run . --cheap          # same plan, ALL tiers on the LIGHT chain
-    bin/ratchet once .                 # one supervised turn (dip a toe first)
+- [ ] T5.1 (trivial) README observability rewrite: the new terminal UX end-to-end.
+      touches: README.md
+      do: Rewrite the "Feedback / observability" prose to describe the new
+          run-time terminal (PM header, in-place heartbeat, curated summary) and
+          the ETA caveat (naive avg × remaining, labelled `~`). Remove the
+          description of the old 12-line dump / byte-counter heartbeat.
+      accept:
+          Given the README
+          When a new user reads the observability section
+          Then it describes the PM header, in-place heartbeat, curated summary,
+               and honestly caveats the ETA
+      verify: bash test/selftest.sh
+      constraints: doc-only.
 
-Overnight:
+## Definition of done
 
-    nohup bin/ratchet run . >/dev/null 2>&1 &
-    tail -f ~/.ratchet/logs/ratchet/loop.log
+`bash test/selftest.sh` green with ALL new cases (render suite, milestone-parse,
+ETA, status board). A live run shows a PM header answering step/now/left/ETA;
+heartbeats update ONE line in place with human words and no byte counter; the
+post-turn excerpt is a short curated summary; `bin/ratchet status .` renders a
+full milestone board with progress bar and ETA; `watch -n5 bin/ratchet status .`
+is a usable live board. Every existing `loop.log` line format is unchanged and
+`ratchet stats`/`status` still parse old logs.
 
-Human checkpoints that remain yours: review `ratchet plan` output (T2.1 stops
-loudly), the M6.5 A/B verdict, and every push (`git push` when you're happy —
-the loop never pushes without --push).
+## Non-goals
 
-## Done means
-
-`bash test/selftest.sh` green with ALL new cases; unset tier keys ≡ today's
-behavior; `(trivial)` tasks provably run on the light chain; `ratchet plan`
-drafts and stops for human review; `FANOUT` unset ≡ today's invocation
-byte-for-byte; a killed run leaves a state the next start explains out loud;
-you can glance at a running loop and know the task, the elapsed time, the
-progress, and what's next; `ratchet run --cheap` is all it takes to pick the
-cheap chain.
+- No full-screen/ncurses TUI or alternate-screen redraw — native `watch(1)` +
+  in-place heartbeat is the lazy live view.
+- No change to any `loop.log` line format, `cmd_stats` parsing, or the tracker
+  grammar.
+- No new runtime dependency for the loop core (python3 stays optional, only for
+  `stats`; the board prefers awk).
+- No per-task time tracking beyond the naive turn-average ETA (revisit only if
+  the estimate proves misleading in practice).

@@ -26,7 +26,7 @@ unset _src _dir
 export RATCHET_ROOT
 
 for _mod in common contract tracker classify model-fallback models \
-            commit-gate session-sanitize observability run-turn commands; do
+            commit-gate session-sanitize observability run-turn commands render; do
   # shellcheck disable=SC1090
   . "$RATCHET_ROOT/lib/${_mod}.sh"
 done

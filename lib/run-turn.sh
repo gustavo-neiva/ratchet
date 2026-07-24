@@ -80,19 +80,27 @@ run_turn() {
     if [ "$STREAM_AGENT" = 1 ]; then print_new_bytes stream_off; fi
     if [ "$QUIET" = 0 ] && [ "$HEARTBEAT" -gt 0 ] && (( SECONDS - start >= last_hb + HEARTBEAT )); then
       last_hb=$(( SECONDS - start ))
-      local act
+      local elapsed="${last_hb}s"
+      local evt=""
       if [ "$pi_json" = 1 ]; then
-        # json stream: show last event type + volume (proof of life)
-        act="$(tail -n1 "$TURN_OUT" 2>/dev/null | sed -n 's/.*"type":"\([a-z_]*\)".*/\1/p') ${sz}b"
-      else
-        # show what the agent is actually doing: last non-empty output line (ANSI/CR-stripped)
-        local esc; esc=$(printf '\033')
-        act=$(tail -c 2000 "$TURN_OUT" 2>/dev/null | tr -d '\r' | sed "s/${esc}\[[0-9;]*[A-Za-z]//g" | grep -v '^[[:space:]]*$' | tail -n1 | cut -c1-80)
+        evt="$(tail -n1 "$TURN_OUT" 2>/dev/null | sed -n 's/.*"type":"\([a-z_]*\)".*/\1/p')"
       fi
-      term_only "  ... working (${last_hb}s, model=$model)${act:+ | $act}"
+      local activity; activity="$(render_activity "$evt")"
+      if ansi_ok; then
+        # TTY: in-place update, no newline
+        printf '\r\033[K  … %s (%s)' "$activity" "$elapsed" >&2
+      else
+        # non-TTY (log/pipe): keep newline behavior
+        term_only "  ... working ($elapsed, model=$model) | $activity"
+      fi
     fi
     sleep 3
   done
+
+  # Print trailing newline after in-place updates so next emit starts fresh
+  if [ "$QUIET" = 0 ] && [ "$HEARTBEAT" -gt 0 ] && ansi_ok; then
+    printf '\n' >&2
+  fi
 
   # If still alive (token seen but agent hanging, OR deadline): terminate, then SIGKILL.
   if kill -0 "$pid" 2>/dev/null; then
