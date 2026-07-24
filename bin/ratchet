@@ -253,10 +253,25 @@ main() {
     emit "WARNING: staged changes detected at startup (previous killed run?) — they will ride the next green-gated commit."
   fi
 
-  local turn=0 current_tier="" current_tier_chain="" done_gate_fails=0
+  local turn=0 current_tier="" current_tier_chain="" done_gate_fails=0 last_model="none"
   while true; do
     turn=$((turn+1))
-    
+
+    # All-done fast-path: tracker has no open/in-progress task but HAS completed
+    # tasks -> the plan is finished. Do NOT spawn a turn on a "?" task: a cheap
+    # model with nothing concrete to do spins on reasoning (observed: glm-5-turbo,
+    # 155s+ of hung thinking). Final green-gated commit of any staged work, then stop.
+    if ! tracker_has_open && ! tracker_has_inprogress && [ "$(tracker_count_done)" -gt 0 ]; then
+      emit "all $TRACKER_FILE tasks complete ($(tracker_count_done) done) — no open work remains."
+      if commit_turn "final" "$last_model"; then
+        emit "agent signaled $DONE_TOKEN — all work complete."
+        maybe_push_or_pr
+      else
+        emit "final commit gate RED — staged work left for human review (see $LOOP_LOG)."
+      fi
+      break
+    fi
+
     # Tier routing: determine tier from tracker tag, reinit models only on tier change.
     local tag tier tier_chain tier_thinking
     tag=$(tracker_next_tag)
@@ -296,6 +311,7 @@ main() {
     fi
     
     local model="${models_arr[$idx]}"
+    last_model="$model"
     tier_thinking=$(thinking_for_tier "$tier")
     THINKING="$tier_thinking"  # set global THINKING for run_turn
 

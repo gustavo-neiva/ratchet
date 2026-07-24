@@ -474,8 +474,13 @@ cmd_doctor() {
   local tr="${TRACKER_FILE:-$(detect_tracker_file "$dir")}"
   if [ -n "$tr" ] && [ -f "$dir/$tr" ]; then
     TRACKER_FILE="$tr"; REPO_DIR="$dir"
-    if tracker_has_open; then pr_ok "tracker '$tr' has an open task"
-    else pr_fail "tracker '$tr' has NO open task (all done, or add work)"; fi
+    if tracker_has_open; then
+      pr_ok "tracker '$tr' has an open task"
+    elif [ "$(tracker_count_done)" -gt 0 ]; then
+      pr_ok "tracker '$tr' fully done (all [x]) — loop final-commits + stops"
+    else
+      pr_fail "tracker '$tr' has NO tasks (empty/unparsed) — add work"
+    fi
   else
     pr_fail "no tracker found (PLAN.md/TODO.md/TASKS.md) — run: ratchet init $dir"
   fi
