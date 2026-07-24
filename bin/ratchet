@@ -78,6 +78,7 @@ parse_args() {
       --tail)           TAIL_LINES="${2:-}"; shift 2;;
       --heartbeat)      HEARTBEAT="${2:-}"; shift 2;;
       --stream)         STREAM_AGENT=1; shift;;
+      --cheap)          CHEAP_MODE=1; shift;;
       --quiet)          QUIET=1; STREAM_AGENT=0; shift;;
       --once)           ONCE=1; shift;;
       --selftest)       SELFTEST=1; COMMAND="selftest"; shift;;
@@ -211,6 +212,7 @@ main() {
   emit "  tokens    : step='${STEP_TOKEN}'  done='${DONE_TOKEN}'"
   emit "  agent     : $AGENT_CMD"
   emit "  thinking  : ${THINKING:-inherit}"
+  [ "$CHEAP_MODE" = 1 ] && emit "  cheap     : ALL tiers → $(chain_for_tier light)"
   emit "  verify    : ${VERIFY_CMD:-<EMPTY — loud warning, no gate>}"
   emit "  commit    : per-turn=$([ "$COMMIT_EACH_TURN" = 1 ] && echo yes || echo no)  push-on-done=$([ "$PUSH_ON_DONE" = 1 ] && echo yes || echo no)  pr=$([ "$OPEN_PR" = 1 ] && echo yes || echo no)"
   emit "  loop log  : $LOOP_LOG"
@@ -218,6 +220,12 @@ main() {
   emit "============================================================"
 
   cd "$REPO_DIR" || die "cannot cd into $REPO_DIR"
+
+  # leftover staged changes (e.g. a previous run killed mid-gate) ride the next
+  # green-gated commit — safe, but never silent.
+  if [ -d .git ] && ! git diff --cached --quiet 2>/dev/null; then
+    emit "WARNING: staged changes detected at startup (previous killed run?) — they will ride the next green-gated commit."
+  fi
 
   local turn=0 current_tier="" current_tier_chain=""
   while true; do
@@ -231,6 +239,7 @@ main() {
       hard)    tier="build-hard" ;;  # bumps thinking unless THINKING_BUILD is set
       *)       tier="build" ;;
     esac
+    [ "$CHEAP_MODE" = 1 ] && tier="light"   # --cheap: every task on the light chain
     tier_chain=$(chain_for_tier "${tier%-hard}")  # strip -hard suffix for chain lookup
     
     # Reinit models ONLY when tier changes (preserve bench/cooldown state within a tier).

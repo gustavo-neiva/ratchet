@@ -60,6 +60,7 @@ SANITIZE_THINKING=1             # 1 = strip prior thinking blocks so any provide
 
 # --- feedback / observability ---
 QUIET=0                         # 1 = terminal silent; logs only
+CHEAP_MODE=0                    # 1 = force ALL tiers to the LIGHT chain (--cheap)
 TAIL_LINES=12                   # lines of agent output to echo after a turn
 HEARTBEAT=15                    # seconds between "still working" pings (0 = off)
 STREAM_AGENT=0                  # 1 = live-stream the agent's raw output (noisy)
@@ -170,6 +171,11 @@ Options:
 
   Feedback / observability:
       --tail N / --heartbeat N / --stream / --quiet
+
+  Model selection:
+      --cheap                  Force ALL tiers to the LIGHT chain (LIGHT_MODELS, else MODELS).
+                               The one-word overnight-on-the-cheap-model switch. Use -m for
+                               an explicit chain override.
 
   -v, --verbose          Verbose logging.   -h, --help  Show this help.
 

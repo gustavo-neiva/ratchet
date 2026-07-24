@@ -2,7 +2,7 @@
 # =============================================================================
 #  selftest.sh — verify ratchet's detection + loop logic (NO model calls)
 # =============================================================================
-#  Seven suites:
+#  Suites:
 #    1. turn-outcome classification (token / exhausted / hard / transient)
 #    2. tracker tag extraction (trivial|normal|hard routing tags)
 #    3. contract parsing (allowlisted keys, unknown key rejection)
@@ -344,6 +344,63 @@ if grep -q 'tier=light.*model=fake/light-model' "$tmp3/run.log"; then
   ok "trivial task routes to LIGHT_MODELS (tier=light)"
 else
   fail "trivial task did not route to LIGHT_MODELS (see $tmp3/run.log)"
+fi
+
+echo ""
+echo "== suite 10: builtin secret scan (BSD-grep-safe patterns) =="
+. "$RR/lib/commit-gate.sh"
+check_secret() {  # NAME EXPECT_RC(0=block,1=clean) CONTENT
+  local name="$1" exp="$2" content="$3" d rc errf
+  d="$(mktemp -d)"; errf="$d/.stderr"
+  git -C "$d" init -q
+  printf '%s\n' "$content" > "$d/f.txt"
+  git -C "$d" add f.txt
+  ( cd "$d" && builtin_secret_scan 2>"$errf" ); rc=$?
+  if [ "$rc" = "$exp" ] && ! grep -q 'grep:' "$errf"; then ok "secret-scan $name"
+  else fail "secret-scan $name (rc=$rc want=$exp, stderr: $(cat "$errf"))"; fi
+  rm -rf "$d"
+}
+check_secret "openssh-private-key blocks" 0 '-----BEGIN OPENSSH PRIVATE KEY-----'
+check_secret "bare-private-key blocks"    0 '-----BEGIN PRIVATE KEY-----'
+check_secret "clean-diff passes"          1 'just a normal line of code'
+
+echo ""
+echo "== suite 11: --cheap flag + staged-changes startup warning =="
+tmp4="$(mktemp -d)"
+trap 'rm -rf "$tmp4"' EXIT
+cat > "$tmp4/PLAN.md" <<'EOF'
+# Test plan
+- [ ] T1 (hard) heavy task
+EOF
+cat > "$tmp4/verify.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$tmp4/verify.sh"
+cat > "$tmp4/.ratchet.conf" <<'EOF'
+RATCHET_PROTOCOL=1
+TRACKER_FILE=PLAN.md
+VERIFY_CMD=./verify.sh
+LIGHT_MODELS=fake/light-model
+BUILD_MODELS=fake/build-model
+EOF
+"$RATCHET" init "$tmp4" >/dev/null 2>&1
+git -C "$tmp4" init -q
+git -C "$tmp4" add -A
+git -C "$tmp4" commit -q -m "baseline"
+# pre-stage a file to trigger the startup warning
+echo "leftover" > "$tmp4/staged.txt"
+git -C "$tmp4" add staged.txt
+"$RATCHET" once "$tmp4" --cheap --agent-cmd "$FAKE" >"$tmp4/run.log" 2>&1
+if grep -q 'tier=light.*model=fake/light-model' "$tmp4/run.log"; then
+  ok "--cheap routes a (hard) task to the LIGHT chain"
+else
+  fail "--cheap did not route hard task to LIGHT chain (see $tmp4/run.log)"
+fi
+if grep -q 'staged changes detected at startup' "$tmp4/run.log"; then
+  ok "staged-changes startup warning emitted"
+else
+  fail "no staged-changes warning (see $tmp4/run.log)"
 fi
 
 echo ""

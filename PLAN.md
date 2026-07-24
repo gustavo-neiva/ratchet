@@ -52,7 +52,7 @@ but bump thinking one notch above `THINKING_BUILD` (max `high`) unless
 
 ## Milestone 2 — plan turns on existing repos (serial)
 
-- [IN PROGRESS] T2.1 (hard, serial) `ratchet plan [REPO]` command: run ONE turn using the PLAN tier (chain_for_tier plan) with a plan-drafting prompt: read the repo, read PLAN.md, draft/refresh open tasks (Milestone-0-walking-skeleton rule, tags on every task), then STOP with a loud "HUMAN: review PLAN.md before running". Never auto-runs the loop after. Reuse the plan-turn machinery from `ratchet new` (extract shared function if needed — smallest possible refactor). Selftest with fake agent: `plan` invokes exactly one turn and does not commit code changes outside PLAN.md/LEARNINGS.md.
+- [ ] T2.1 (hard, serial) `ratchet plan [REPO]` command: run ONE turn using the PLAN tier (chain_for_tier plan) with a plan-drafting prompt: read the repo, read PLAN.md, draft/refresh open tasks (Milestone-0-walking-skeleton rule, tags on every task), then STOP with a loud "HUMAN: review PLAN.md before running". Never auto-runs the loop after. Reuse the plan-turn machinery from `ratchet new` (extract shared function if needed — smallest possible refactor). Selftest with fake agent: `plan` invokes exactly one turn and does not commit code changes outside PLAN.md/LEARNINGS.md.
 - [ ] T2.2 (trivial, serial) `ratchet stats`: extend to count turns per tier and per model from the new `tier=` log lines (old logs without tier lines must not break stats). Selftest: stats on a fixture log with and without tier lines.
 
 ## Milestone 3 — docs + parity follow-ups (parallel-safe)
@@ -64,9 +64,9 @@ but bump thinking one notch above `THINKING_BUILD` (max `high`) unless
 
 ## Milestone 4 — run health & correctness (serial: found in the 2026-07-24 run postmortem)
 
-- [ ] T4.1 (trivial, serial) Secret-scan regression test: the private-key pattern used an empty alternation `(DSA |)` that BSD grep -E rejects (`grep: empty (sub)expression`) — the check silently no-oped on EVERY commit. The regex is already fixed in `lib/commit-gate.sh`. Add selftest cases: (a) a staged diff containing `-----BEGIN OPENSSH PRIVATE KEY-----` blocks the commit, (b) a bare `-----BEGIN PRIVATE KEY-----` (no algo prefix) also blocks, (c) the gate run produces NO stderr noise (assert `grep:` never appears in gate output).
+- [x] T4.1 (trivial, serial) Secret-scan regression test: the private-key pattern used an empty alternation `(DSA |)` that BSD grep -E rejects (`grep: empty (sub)expression`) — the check silently no-oped on EVERY commit. The regex is already fixed in `lib/commit-gate.sh`. Add selftest cases: (a) a staged diff containing `-----BEGIN OPENSSH PRIVATE KEY-----` blocks the commit, (b) a bare `-----BEGIN PRIVATE KEY-----` (no algo prefix) also blocks, (c) the gate run produces NO stderr noise (assert `grep:` never appears in gate output).
 - [ ] T4.2 (normal, serial) `ratchet doctor` + run preflight: FAIL when the repo is mid-operation — `.git/rebase-merge`, `.git/rebase-apply`, `.git/MERGE_HEAD`, or `.git/CHERRY_PICK_HEAD` exists. The 2026-07-24 run committed 8 turns inside a stalled interactive rebase; one `git rebase --abort` would have destroyed them all. Selftest: fake repo with a `.git/rebase-merge` dir → doctor fails with a message naming the state and the safe exit (`--quit` vs `--abort`).
-- [ ] T4.3 (trivial, serial) Startup staged-changes check: if `git diff --cached --quiet` fails at loop start, warn LOUDLY (`staged changes from a previous killed run — they will ride the next commit`). Do not block (the next green gate covers safety). Selftest: staged file at startup → warning line appears in loop.log.
+- [x] T4.3 (trivial, serial) Startup staged-changes check: if `git diff --cached --quiet` fails at loop start, warn LOUDLY (`staged changes from a previous killed run — they will ride the next commit`). Do not block (the next green gate covers safety). Selftest: staged file at startup → warning line appears in loop.log.
 
 ## Milestone 5 — observability & UX (serial: all touch bin/ratchet + observability.sh)
 
@@ -80,7 +80,7 @@ but bump thinking one notch above `THINKING_BUILD` (max `high`) unless
 - [ ] T5.3 (trivial, serial) Progress line each turn: `tasks: 7 done / 14 total | next: T2.2` using existing `tracker_done_count` + a total count. Emit right before the turn header. Selftest: fixture tracker → correct counts.
 - [ ] T5.4 (normal, serial) Heartbeat shows activity, not just elapsed: replace the payload of `... working (45s, model=X)` internals — keep that exact line, ADD the last non-empty line of `$TURN_OUT` truncated to 80 chars as a suffix: `... working (45s, model=X) | Extended ratchet doctor to disp…`. Guard: strip ANSI + carriage returns. Selftest: fake agent writing known output → heartbeat suffix appears.
 - [ ] T5.5 (hard, serial) `ratchet status [REPO]` command: one-shot snapshot for a second terminal (complement to `watch` which needs --resume sessions): reads loop.log + tracker + last_turn.out → prints current/last turn number, task, model+tier, elapsed (running) or took (finished), tasks done/total, last 5 output lines, and whether the loop process is alive (pgrep on the loop pid file — write `$LOG_DIR/loop.pid` at start, additive). Selftest: status against a fixture LOG_DIR renders all fields; no pid file → `not running`.
-- [ ] T5.6 (trivial, serial) `--cheap` flag: force ALL tiers to the LIGHT chain for this run (`LIGHT_MODELS` if set, else `MODELS`) — the one-word way to run the loop on the cheap model overnight: `ratchet run --cheap`. Log `cheap mode: all tiers → <chain>` in the startup banner. Document `-m/--models` next to it in `--help` as the explicit override. Selftest: `--cheap` with LIGHT_MODELS set routes a `(hard)` task to the light chain.
+- [x] T5.6 (trivial, serial) `--cheap` flag: force ALL tiers to the LIGHT chain for this run (`LIGHT_MODELS` if set, else `MODELS`) — the one-word way to run the loop on the cheap model overnight: `ratchet run --cheap`. Log `cheap mode: all tiers → <chain>` in the startup banner. Document `-m/--models` next to it in `--help` as the explicit override. Selftest: `--cheap` with LIGHT_MODELS set routes a `(hard)` task to the light chain.
 
 ## Milestone 6 — strategy: fanout + proof (from docs/STRATEGY.md, human-reviewed)
 
@@ -95,6 +95,29 @@ but bump thinking one notch above `THINKING_BUILD` (max `high`) unless
 - [ ] T6.5 (normal) One `FANOUT=scout` A/B experiment on a real `(hard)` task: run the same task once with `FANOUT=off` and once with `scout`, record wall-clock + token cost in LEARNINGS.md. If scout is not clearly better, keep the key but note the finding — do NOT default it on.
 - [ ] T6.6 (trivial) docs/comparison.md: the §1.2 competitor table from docs/STRATEGY.md (looper, loop-harness, ouro-loop), one paragraph per differentiator. Link from README.
 - [ ] T6.7 (trivial) README repositioning: lead with 'survives provider rate limits + never commits a red tree'; add the 'zero deps' footnote (loop core is bash-only; `stats` needs python3, `watch` prefers jq).
+
+## How to finish this plan (dogfood — ratchet builds ratchet)
+
+Everything still open is loop-work. Order is top-down as written: M2 (plan
+command + stats) → M3 (docs) → M4 (T4.2 doctor mid-rebase guard) → M5
+(observability: task-in-header, took=, progress, heartbeat activity, `status`)
+→ M6 (FANOUT + bench + positioning docs). M5 lands the UI/UX you'll use to
+WATCH the expensive M6 tasks run — do not reorder M6 before M5.
+
+From the repo root:
+
+    bin/ratchet run .                  # full run on the conf's MODELS/tier chains
+    bin/ratchet run . --cheap          # same plan, ALL tiers on the LIGHT chain
+    bin/ratchet once .                 # one supervised turn (dip a toe first)
+
+Overnight:
+
+    nohup bin/ratchet run . >/dev/null 2>&1 &
+    tail -f ~/.ratchet/logs/ratchet/loop.log
+
+Human checkpoints that remain yours: review `ratchet plan` output (T2.1 stops
+loudly), the M6.5 A/B verdict, and every push (`git push` when you're happy —
+the loop never pushes without --push).
 
 ## Done means
 
