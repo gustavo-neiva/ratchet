@@ -40,8 +40,7 @@ ratchet/
 │   └── commands.sh          # init/new/doctor
 ├── templates/               # onboarding files
 ├── test/selftest.sh         # no-API verification suite
-├── examples/demo-repo/      # tutorial/demo project
-└── docs/                    # deep-dive documentation (future)
+└── examples/demo-repo/      # tutorial/demo project
 ```
 
 ## Testing

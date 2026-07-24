@@ -15,7 +15,6 @@ All notable changes to ratchet will be documented in this file.
 - ✅ `ratchet plan` command for plan-drafting turns
 - ✅ Per-tier model chains and thinking levels
 - ✅ Tier statistics in `ratchet stats`
-- ✅ Parity audit documenting autonomous_loop.sh equivalents
 - ✅ `--cheap` flag to force all tiers to LIGHT chain
 - ✅ Turn observability: tier, task ID, duration, progress
 

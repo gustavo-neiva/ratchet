@@ -18,11 +18,7 @@ Run a headless coding agent **unattended** (hours, overnight) against any repo, 
 - **Never committing red:** re-runs your test suite before EVERY commit. RED blocks the commit.
 - **Surviving rate limits:** multi-provider fallback + cooldowns (hours-long runs across daily quotas).
 - **Routing human judgment:** plan authoring, plan review, and PR review are human checkpoints. Mechanical execution runs unattended between them.
-- **Staying cheap:** ephemeral turns (~90% per-turn cost cut vs. resumed sessions). The tracker file is the memory.
-
-## One capability
-
-*Unattended-but-safe agent execution.* An agent that can run for hours without a babysitter, yet **cannot** ship unreviewed code or commit a red tree — and that **pulls the human in exactly where judgment matters**.
+- **Staying cheap:** ephemeral turns send only the tracker + files each turn, not a growing session — a fraction of a resumed session's per-turn cost. The tracker file is the memory.
 
 ## Quick start
 
@@ -173,9 +169,14 @@ The engine is task-agnostic. Your repo's contract files carry all project knowle
 
 The loop runs **one turn, one commit** — sequential, green-gated, easy to bisect/revert. Parallel turns (`--parallel N`) are opt-in for tasks the tracker marks non-`serial`, each in an isolated `git worktree`. Concurrent writers over a shared tree are never safe.
 
-### Token economy (proven in real use)
+### Token economy
 
-Ephemeral turns are the DEFAULT: `--no-session --no-extensions` each turn. The tracker + on-disk markdown files are the only memory. Measured **~90% per-turn cost cut** vs. resumed sessions in daily use (mid-2026). Survives hours-long runs across provider daily quotas.
+Ephemeral turns are the DEFAULT: `--no-session --no-extensions` each turn. The
+tracker + on-disk markdown files are the only memory, so each turn sends a small
+fixed context instead of a session that grows every turn. Per-turn cost stays
+flat and low over hours-long runs, which is what lets it survive provider daily
+quotas. (No token benchmark is shipped here; the saving is structural, not a
+measured figure.)
 
 ### Model fallback + rate-limit survival
 
@@ -322,7 +323,7 @@ models          List/add/remove/validate model chains (--tier, --pos, --repo)
 ### Token economy
 
 ```
---resume / --no-resume      Default: ephemeral turns (~90% cheaper)
+--resume / --no-resume      Default: ephemeral turns (flat, low per-turn cost)
 --cache-retention LEVEL     Prompt-cache TTL: long|short|none
 --no-sanitize               Don't strip thinking blocks (debug only)
 ```
@@ -341,8 +342,6 @@ models          List/add/remove/validate model chains (--tier, --pos, --repo)
 
 Pi already provides `pi-subagents` (delegate to child agents) and `@pi-agents/loop` (scheduled/recurring tasks). **ratchet** fills a different gap:
 
-**See [docs/comparison.md](docs/comparison.md)** for a full comparison with looper, loop-harness, and ouro-loop.
-
 | Feature | ratchet | pi-subagents | @pi-agents/loop |
 |---|---|---|---|
 | **Unattended multi-hour runs** | ✓ (rate-limit survival) | ✗ (synchronous) | ✗ (scheduling only) |
@@ -350,21 +349,11 @@ Pi already provides `pi-subagents` (delegate to child agents) and `@pi-agents/lo
 | **Multi-provider fallback** | ✓ (survives quotas) | ✗ | ✗ |
 | **Repo contract (task-agnostic)** | ✓ (4 files) | ✗ | ✗ |
 | **Human checkpoints** | ✓ (plan review, PR review) | ✗ | ✗ |
-| **Ephemeral turns (cheap)** | ✓ (~90% cost cut) | ✗ | ✗ |
+| **Ephemeral turns (cheap)** | ✓ (flat per-turn context) | ✗ | ✗ |
 
 Use **ratchet** for: unattended overnight coding runs, quota-bound long tasks, multi-repo pipelines.  
 Use **pi-subagents** for: delegating sub-tasks within an interactive session.  
 Use **@pi-agents/loop** for: scheduling periodic prompts (cron-style).
-
-## Uniqueness (5 mechanisms)
-
-1. **Green-gated commit ownership** — the loop re-runs your test suite before EVERY commit; RED blocks.
-2. **Model fallback + bench/cooldown** — survives rate limits across multi-provider chains.
-3. **Ephemeral turn economy** — tracker file = memory; ~90% per-turn savings (measured).
-4. **Session sanitization** — strips prior thinking blocks so any provider can continue any session.
-5. **Repo contract + human checkpoints** — 4 files declare ALL project knowledge; plan review is mandatory.
-
-None of these exist in `pi-subagents` or `@pi-agents/loop` — so **ratchet** complements rather than duplicates.
 
 ## Project structure
 
@@ -390,17 +379,8 @@ ratchet/
 ├── test/
 │   ├── selftest.sh          # no-API verification
 │   └── fixtures/            # fake-agent + test repo
-├── examples/demo-repo/      # toy project (tutorial)
-└── docs/                    # deep-dive docs
+└── examples/demo-repo/      # toy project (tutorial)
 ```
-
-## Evidence base
-
-This is a **clean rebuild** of a harness in daily use (mid-2026). The real script:
-- `~/.pi/autonomous_loop.sh` (791 lines, real runs in `autoloop-logs/cookbook/`)
-- `~/.pi/autonomous_loop_PLAN_v2.md` (the v2 repo-contract design)
-
-This public repo implements that v2 design, generalized and task-agnostic. No internal code copied.
 
 ## Residual risks / honest gaps (v1)
 
@@ -422,17 +402,6 @@ Contributions welcome! This is a clean, public, open-source rebuild. No internal
 1. Run `bin/ratchet --selftest` (all must pass)
 2. Keep the task-agnostic invariant: zero project knowledge in `lib/`, `bin/`, `templates/`
 3. The repo contract (4 files) is the ONLY place project specifics live
-
-## What it proves
-
-Systems thinking about **unattended agents**:
-- Rate-limit survival across multi-provider chains
-- Green-gated safety (RED never commits)
-- Human judgment routed to the right boundaries (plan authoring, plan review, PR review)
-- Measured cost engineering (ephemeral turns, ~90% savings)
-- Observability (heartbeats, live watch, loop.log)
-
-This is a distinctive **agent infrastructure** signal, not another skill wrapper.
 
 ---
 
