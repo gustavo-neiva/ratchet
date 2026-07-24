@@ -9,3 +9,4 @@
 - T0.1: Baseline confirmed — `bash test/selftest.sh` passes 19/19 (13 turn classification, 1 sanitizer, 1 agnosticism, 4 end-to-end).
 - T0.2: Parity audit complete — ZERO gaps found. All old-loop behaviors are present in ratchet (security hardening + enhancements are additive). No Milestone 3 tasks needed.
 - T1.1: Added `tracker_next_tag` function + 7 selftest cases. Selftest now passes 26/26 (12 turn classification, 1 deadline, 7 tracker tag extraction, 1 sanitizer, 1 agnosticism, 4 end-to-end).
+- T1.2: Added six tier config keys (`PLAN_MODELS BUILD_MODELS LIGHT_MODELS THINKING_PLAN THINKING_BUILD THINKING_LIGHT`) to `CONTRACT_KEYS` and `lib/common.sh` defaults. Added contract-parsing selftest suite (2 cases). Selftest now passes 28/28 (12 turn classification, 7 tracker tag, 2 contract parsing, 1 sanitizer, 1 agnosticism, 5 end-to-end).

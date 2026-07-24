@@ -45,6 +45,14 @@ ALLOWED_PROVIDERS=""            # comma list; unset = global chain. Data-governa
 
 THINKING=""                     # reasoning level passed each turn (off|minimal|low|medium|high|xhigh)
 
+# --- tiered model routing (v1.1) ---
+PLAN_MODELS=""                  # comma-separated chain for plan-drafting turns (unset → MODELS)
+BUILD_MODELS=""                 # comma-separated chain for normal/hard tasks (unset → MODELS)
+LIGHT_MODELS=""                 # comma-separated chain for trivial tasks (unset → MODELS)
+THINKING_PLAN=""                # thinking level for PLAN tier (unset → THINKING)
+THINKING_BUILD=""               # thinking level for BUILD tier (unset → THINKING)
+THINKING_LIGHT=""               # thinking level for LIGHT tier (unset → THINKING)
+
 # --- token economy (quota saving) ---
 RESUME_SESSION=0                # 0 = EPHEMERAL turns (tracker = memory, cheap). 1 = resume one session.
 CACHE_RETENTION="long"          # prompt-cache TTL for the stable prefix (long|short|none)

@@ -2,12 +2,13 @@
 # =============================================================================
 #  selftest.sh — verify ratchet's detection + loop logic (NO model calls)
 # =============================================================================
-#  Five suites:
+#  Six suites:
 #    1. turn-outcome classification (token / exhausted / hard / transient)
 #    2. tracker tag extraction (trivial|normal|hard routing tags)
-#    3. cross-provider session sanitizer (strips thinking blocks)
-#    4. agnosticism grep-check (zero project knowledge in the tool)
-#    5. end-to-end: `ratchet once` against a fixture repo driven by fake-agent
+#    3. contract parsing (allowlisted keys, unknown key rejection)
+#    4. cross-provider session sanitizer (strips thinking blocks)
+#    5. agnosticism grep-check (zero project knowledge in the tool)
+#    6. end-to-end: `ratchet once` against a fixture repo driven by fake-agent
 #       -> proves spawn -> watchdog -> classify -> green gate -> commit works
 #          with ZERO api keys (this is what makes the loop testable in CI).
 #
@@ -32,6 +33,7 @@ STEP_TOKEN="STEP_COMPLETE"; DONE_TOKEN="ALL_DONE"
 . "$RR/lib/classify.sh"
 . "$RR/lib/session-sanitize.sh"
 . "$RR/lib/tracker.sh"
+. "$RR/lib/contract.sh"
 
 echo "== suite 1: turn classification =="
 check_class() {  # NAME EXPECTED STRING
@@ -81,7 +83,34 @@ check_tag "inprogress-wins" "hard" "- [IN PROGRESS] T2.1 (hard) big task
 - [ ] T2.2 (trivial) small task"
 check_tag "only-done" "normal" "- [x] T1.1 (trivial) finished"
 
-echo "== suite 3: session sanitizer =="
+echo "== suite 3: contract parsing =="
+# Test that tier keys parse correctly
+check_tier_key() {
+  local tmpconf; tmpconf="$(mktemp)"
+  printf 'LIGHT_MODELS="a/b"\n' > "$tmpconf"
+  if parse_repo_conf "$tmpconf" 2>/dev/null; then
+    [ "$LIGHT_MODELS" = "a/b" ] && ok "tier-key parses" || fail "tier-key parsed but value wrong: got=$LIGHT_MODELS"
+  else
+    fail "tier-key parse failed"
+  fi
+  rm -f "$tmpconf"
+}
+check_tier_key
+
+# Test that unknown keys still error
+check_unknown_key() {
+  local tmpconf; tmpconf="$(mktemp)"
+  printf 'UNKNOWN_KEY="value"\n' > "$tmpconf"
+  if parse_repo_conf "$tmpconf" 2>/dev/null; then
+    fail "unknown-key should error but passed"
+  else
+    [ -n "$RATCHET_CONF_ERRORS" ] && ok "unknown-key rejected" || fail "unknown-key rejected but no error message"
+  fi
+  rm -f "$tmpconf"
+}
+check_unknown_key
+
+echo "== suite 4: session sanitizer =="
 if command -v python3 >/dev/null 2>&1; then
   sf="$LOG_DIR/sess.jsonl"
   {
@@ -117,7 +146,7 @@ else
   fail "python3 missing (sanitizer untested)"
 fi
 
-echo "== suite 4: agnosticism (zero project knowledge) =="
+echo "== suite 5: agnosticism (zero project knowledge) =="
 if grep -riE 'cookbook|cap_table|carta|erl_crash|issuance|reporting|jira|secm-' \
      "$RR/lib" "$RR/bin" "$RR/templates" 2>/dev/null; then
   fail "project knowledge leaked into lib/bin/templates"
@@ -125,7 +154,7 @@ else
   ok "no project knowledge in lib/bin/templates"
 fi
 
-echo "== suite 5: end-to-end (fake-agent, no api keys) =="
+echo "== suite 6: end-to-end (fake-agent, no api keys) =="
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 cp "$RR/test/fixtures/fixture-repo/PLAN.md" "$tmp/"
