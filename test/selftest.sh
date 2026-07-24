@@ -485,6 +485,52 @@ else
   fail "uncommitted code edit was committed/staged by plan"
 fi
 
+# --- suite 8: stats (tier and model counts from loop.log) ---------------
+echo "== suite 8: stats (tier/model counts) =="
+. "$RR/lib/observability.sh"
+
+# (a) old format log (no tier lines) — must not break
+LOOP_LOG="$RR/test/fixtures/logs/old-format.log"
+models_arr=("anthropic/claude-sonnet-4")
+out="$(cmd_stats 2>&1)"
+if printf '%s' "$out" | grep -q 'turns started.*:.*4'; then
+  ok "old-format log: counts 4 turns"
+else
+  fail "old-format log: turn count failed ($out)"
+fi
+if printf '%s' "$out" | grep -q 'step-success rate'; then
+  ok "old-format log: computes success rate"
+else
+  fail "old-format log: success rate missing"
+fi
+if printf '%s' "$out" | grep -q 'turns by tier'; then
+  fail "old-format log: should NOT show tier counts (no tier lines)"
+else
+  ok "old-format log: no tier counts (backward compat)"
+fi
+
+# (b) new format log (with tier lines) — shows tier and model counts
+LOOP_LOG="$RR/test/fixtures/logs/new-format.log"
+models_arr=("zai/glm-5-turbo")
+out="$(cmd_stats 2>&1)"
+if printf '%s' "$out" | grep -q 'turns started.*:.*5'; then
+  ok "new-format log: counts 5 turns"
+else
+  fail "new-format log: turn count failed"
+fi
+if printf '%s' "$out" | grep -q 'turns by tier.*build=2.*light=2.*plan=1'; then
+  ok "new-format log: tier counts (build=2 light=2 plan=1)"
+else
+  fail "new-format log: tier counts wrong or missing (got: $(printf '%s' "$out" | grep 'turns by tier' || echo '<none>'))"
+fi
+if printf '%s' "$out" | grep -q 'turns by model.*anthropic/claude-fable-5=1' && \
+   printf '%s' "$out" | grep -q 'anthropic/claude-sonnet-4=2' && \
+   printf '%s' "$out" | grep -q 'zai/glm-5-turbo=2'; then
+  ok "new-format log: model counts (fable=1 sonnet=2 glm=2)"
+else
+  fail "new-format log: model counts wrong or missing (got: $(printf '%s' "$out" | grep 'turns by model' || echo '<none>'))"
+fi
+
 echo ""
 echo "selftest: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
