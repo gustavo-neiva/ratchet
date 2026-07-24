@@ -1,0 +1,282 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  ratchet — an unattended-but-safe agent loop.  (bash core, entrypoint)
+# =============================================================================
+#  Wraps a headless coding agent (pi, or any -p-style CLI via --agent-cmd) ONE
+#  turn at a time: survives provider rate limits, gates every commit on a green
+#  test suite, and routes shared-state actions (push, PR/MR) through a human.
+#  A RED tree is never committed. The engine is task-agnostic; the repo's own
+#  AGENTS.md + PLAN.md + .ratchet.conf carry all project knowledge.
+#
+#  See `ratchet --help`. Bash 3.2+ (no associative arrays, no `timeout` binary).
+# =============================================================================
+set -o pipefail
+
+# locate this script's repo root so lib/ + templates/ resolve regardless of CWD.
+RATCHET_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export RATCHET_ROOT
+
+for _mod in common contract tracker classify model-fallback \
+            commit-gate session-sanitize observability run-turn commands; do
+  # shellcheck disable=SC1090
+  . "$RATCHET_ROOT/lib/${_mod}.sh"
+done
+unset _mod
+
+# ----------------------------- pre-scan (for conf precedence) ----------------
+# Tolerantly extract just the subcommand + repo dir so we can locate + load the
+# repo's .ratchet.conf (parsed) BEFORE the authoritative flag parse. parse_args
+# (below) is the authority; this only finds command/dir and skips everything else.
+NEW_IDEA=""
+pre_scan() {
+  COMMAND=""; REPO_DIR=""; NEW_IDEA=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -d|--dir)         REPO_DIR="${2:-}"; shift 2;;
+      --dir=*)          REPO_DIR="${1#*=}"; shift;;
+      -p|--prompt|-s|--session|-m|--models|--thinking|--turn-timeout|--cooldown|\
+      --both-wait|--step-token|--done-token|--verify-cmd|--agent-cmd|\
+      --cache-retention|--tail|--heartbeat) shift 2;;
+      init|new|doctor|run|once|selftest|stats|watch)
+        [ -z "$COMMAND" ] && COMMAND="$1"; shift;;
+      -*) shift;;
+      *)
+        if [ "$COMMAND" = "new" ] && [ -z "$NEW_IDEA" ]; then NEW_IDEA="$1"
+        elif [ -z "$REPO_DIR" ]; then REPO_DIR="$1"; fi
+        shift;;
+    esac
+  done
+  [ -n "$COMMAND" ] || COMMAND="run"
+}
+
+# ----------------------------- authoritative arg parser ----------------------
+parse_args() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -d|--dir)         REPO_DIR="${2:-}"; shift 2;;
+      -p|--prompt)      PROMPT_OVERRIDE="${2:-}"; shift 2;;
+      -s|--session)     SESSION_NAME="${2:-}"; shift 2;;
+      -m|--models)      MODELS="${2:-}"; shift 2;;
+      --agent-cmd)      AGENT_CMD="${2:-}"; shift 2;;
+      --thinking)       THINKING="${2:-}"; shift 2;;
+      --turn-timeout)   TURN_TIMEOUT="${2:-}"; shift 2;;
+      --cooldown)       COOLDOWN="${2:-}"; shift 2;;
+      --both-wait)      BOTH_WAIT="${2:-}"; shift 2;;
+      --step-token)     STEP_TOKEN="${2:-}"; shift 2;;
+      --done-token)     DONE_TOKEN="${2:-}"; shift 2;;
+      --commit)         COMMIT_EACH_TURN=1; shift;;
+      --no-commit)      COMMIT_EACH_TURN=0; shift;;
+      --verify-cmd)     VERIFY_CMD="${2:-}"; shift 2;;
+      --no-verify-gate) COMMIT_VERIFY_GATE=0; shift;;
+      --push)           PUSH_ON_DONE=1; shift;;
+      --pr)             OPEN_PR=1; PUSH_ON_DONE=1; shift;;
+      --approve)        APPROVE_UI=1; shift;;
+      --resume)         RESUME_SESSION=1; shift;;
+      --no-resume)      RESUME_SESSION=0; shift;;
+      --cache-retention) CACHE_RETENTION="${2:-}"; shift 2;;
+      --no-sanitize)    SANITIZE_THINKING=0; shift;;
+      --tail)           TAIL_LINES="${2:-}"; shift 2;;
+      --heartbeat)      HEARTBEAT="${2:-}"; shift 2;;
+      --stream)         STREAM_AGENT=1; shift;;
+      --quiet)          QUIET=1; STREAM_AGENT=0; shift;;
+      --once)           ONCE=1; shift;;
+      --selftest)       SELFTEST=1; COMMAND="selftest"; shift;;
+      --stats)          STATS=1; COMMAND="stats"; shift;;
+      --watch)          WATCH=1; COMMAND="watch"; shift;;
+      -v|--verbose)     VERBOSE=1; shift;;
+      -h|--help)        usage; exit 0;;
+      --) shift; break;;
+      init|new|doctor|run|once|selftest|stats|watch) COMMAND="$1"; shift;;
+      -*) die "unknown option: $1 (see --help)";;
+      *)
+        if [ "$COMMAND" = "new" ] && [ -z "$PROMPT_OVERRIDE" ]; then
+          PROMPT_OVERRIDE="$1"     # for `new`, the idea rides in the prompt slot
+        elif [ -z "$REPO_DIR" ]; then REPO_DIR="$1"
+        elif [ "$1" = "$REPO_DIR" ]; then :    # pre_scan already captured it; skip
+        else die "unexpected argument: $1"; fi
+        shift;;
+    esac
+  done
+}
+
+# ----------------------------- push / PR (after ALL_DONE) --------------------
+# Human owns the merge; the loop only opens a reviewable PR. Opt-in (--push/--pr).
+maybe_push_or_pr() {
+  if { [ "$PUSH_ON_DONE" = 1 ] || [ "$OPEN_PR" = 1 ]; } && [ -d "$REPO_DIR/.git" ]; then
+    emit "pushing (after $DONE_TOKEN) ..."
+    if git push >>"$LOOP_LOG" 2>&1; then emit "pushed."; else emit "git push failed (see $LOOP_LOG) — branch left local."; return 1; fi
+    if [ "$OPEN_PR" = 1 ]; then
+      if command -v gh >/dev/null 2>&1 && git remote get-url origin >/dev/null 2>&1; then
+        local body; body="$(tracker_completed_list | sed 's/^/- /')"
+        emit "opening PR (gh) ..."
+        if gh pr create --title "ratchet: $(tracker_completed_subject)" \
+             --body "Autonomous loop completed all tracker tasks.
+
+Completed:
+$body" >>"$LOOP_LOG" 2>&1; then
+          emit "PR opened — review & merge (the agent never merges)."
+        else emit "gh pr create failed (see $LOOP_LOG)."; fi
+      else
+        emit "no gh / no origin remote — leaving the pushed branch for you to open a PR/MR."
+      fi
+    fi
+  fi
+}
+
+# ----------------------------- main ------------------------------------------
+main() {
+  pre_scan "$@"
+
+  # 1) global conf (sourced; trusted; NOT agent-writable) overrides defaults.
+  if [ -f "$GLOBAL_CONF" ]; then
+    # shellcheck disable=SC1090
+    . "$GLOBAL_CONF"
+  fi
+
+  # 2) repo .ratchet.conf (PARSED, never sourced) overrides the global conf.
+  if [ -n "$REPO_DIR" ] && [ -d "$REPO_DIR" ] && [ -f "$REPO_DIR/.ratchet.conf" ]; then
+    if ! parse_repo_conf "$REPO_DIR/.ratchet.conf"; then
+      # tolerate at run time, but surface it; doctor is the strict gate.
+      emit "WARNING: $REPO_DIR/.ratchet.conf has issues (run 'ratchet doctor'):" >&2
+      printf '%b\n' "$RATCHET_CONF_ERRORS" >&2
+    fi
+  fi
+
+  # 3) CLI flags win (authoritative parse).
+  parse_args "$@"
+
+  # fast exits
+  case "$COMMAND" in
+    selftest) exec "$RATCHET_ROOT/test/selftest.sh" ;;
+    -h|help) usage; exit 0 ;;
+  esac
+
+  # token economy: export the cache TTL so the stable prefix stays cached.
+  [ -n "$CACHE_RETENTION" ] && export PI_CACHE_RETENTION="$CACHE_RETENTION"
+
+  # resolve repo dir
+  [ -n "$REPO_DIR" ] || REPO_DIR="$PWD"
+  REPO_DIR="$(cd "$REPO_DIR" 2>/dev/null && pwd)" || die "repo dir not found: $REPO_DIR"
+
+  # session id + slug + logs (logs live OUT of the repo, under RATCHET_HOME).
+  local slug; slug=$(project_slug "$REPO_DIR")
+  if [ -n "$SESSION_NAME" ]; then SESSION_ID="ratchet-${SESSION_NAME}"; else SESSION_ID="ratchet-${slug}"; fi
+  LOG_DIR="$RATCHET_HOME/logs/$slug"; mkdir -p "$LOG_DIR"
+  LOOP_LOG="$LOG_DIR/loop.log"
+  TURN_OUT="$LOG_DIR/last_turn.out"
+
+  case "$COMMAND" in
+    init)    cmd_init "$REPO_DIR"; exit $? ;;
+    new)     cmd_new "${PROMPT_OVERRIDE:-$NEW_IDEA}" "$REPO_DIR"; exit $? ;;
+    doctor)  cmd_doctor "$REPO_DIR" 0; exit $? ;;
+    stats)   init_models "$MODELS"; cmd_stats; exit $? ;;
+    watch)   init_models "$MODELS"; watch_session; exit $? ;;
+  esac
+
+  # run / once: doctor preflight first (fail before the first turn, not turn 3).
+  emit "preflight (doctor) ..."
+  if ! cmd_doctor "$REPO_DIR" 0 >/dev/null 2>&1; then
+    emit "preflight FAILED — run 'ratchet doctor $REPO_DIR' for details. Aborting before any turn."
+    cmd_doctor "$REPO_DIR" 0
+    exit 1
+  fi
+
+  # finalize tracker (auto-detect if conf left it empty)
+  TRACKER_FILE="${TRACKER_FILE:-$(detect_tracker_file "$REPO_DIR")}"
+  [ -n "$TRACKER_FILE" ] || TRACKER_FILE="PLAN.md"
+
+  [ "$COMMAND" = "once" ] && ONCE=1
+
+  PROMPT="${PROMPT_OVERRIDE:-$(build_default_prompt)}"
+  init_models "$MODELS"
+  [ -n "$MODELS" ] || die "no models configured (-m chain, MODELS in .ratchet.conf, or global conf)."
+
+  [ -d "$REPO_DIR/.git" ] || emit "warning: '$REPO_DIR' is not a git repo (continuing)"
+
+  emit "============================================================"
+  emit "ratchet START"
+  emit "  repo      : $REPO_DIR"
+  emit "  session   : $SESSION_ID (resume=$([ "$RESUME_SESSION" = 1 ] && echo yes || echo no))"
+  emit "  tracker   : $TRACKER_FILE"
+  emit "  models    : ${models_arr[*]}  (preference order, fallback chain)"
+  emit "  turn cap  : ${TURN_TIMEOUT}s   cooldown: ${COOLDOWN}s   both-wait: ${BOTH_WAIT}s"
+  emit "  tokens    : step='${STEP_TOKEN}'  done='${DONE_TOKEN}'"
+  emit "  agent     : $AGENT_CMD"
+  emit "  thinking  : ${THINKING:-inherit}"
+  emit "  verify    : ${VERIFY_CMD:-<EMPTY — loud warning, no gate>}"
+  emit "  commit    : per-turn=$([ "$COMMIT_EACH_TURN" = 1 ] && echo yes || echo no)  push-on-done=$([ "$PUSH_ON_DONE" = 1 ] && echo yes || echo no)  pr=$([ "$OPEN_PR" = 1 ] && echo yes || echo no)"
+  emit "  loop log  : $LOOP_LOG"
+  emit "  stop      : Ctrl-C"
+  emit "============================================================"
+
+  cd "$REPO_DIR" || die "cannot cd into $REPO_DIR"
+
+  local turn=0
+  while true; do
+    turn=$((turn+1))
+    local idx; idx=$(pick_model_index)
+    if [ "$idx" = "-1" ]; then
+      emit "ALL models benched (exhausted). Sleeping ${BOTH_WAIT}s, then reset + retry."
+      sleep "$BOTH_WAIT"
+      reset_all
+      continue
+    fi
+    local model="${models_arr[$idx]}"
+    emit "--- turn $turn | model=$model ---"
+
+    run_turn "$model"
+    show_excerpt
+
+    case "$TURN_STATUS" in
+      done)
+        if ! commit_turn "$turn" "$model"; then
+          emit "DONE turn was RED at commit gate — treating as repair-needed, not complete."
+          [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
+          sleep "$SHORT_SLEEP"; continue
+        fi
+        emit "agent signaled $DONE_TOKEN — all work complete."
+        emit "final model used: $model"
+        maybe_push_or_pr
+        break ;;
+      step)
+        transient_arr[$idx]=0
+        if ! commit_turn "$turn" "$model"; then
+          emit "step turn RED at commit gate — next turn will repair. Sleeping ${SHORT_SLEEP}s."
+          [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
+          sleep "$SHORT_SLEEP"; continue
+        fi
+        emit "step complete ($STEP_TOKEN). Sleeping ${SHORT_SLEEP}s."
+        [ "$ONCE" = 1 ] && { emit "--once: stopping after one step."; break; }
+        sleep "$SHORT_SLEEP" ;;
+      exhausted)
+        emit "model $model EXHAUSTED (quota/rate-limit). Benching ${COOLDOWN}s; switching."
+        bench_model "$idx"
+        [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
+        sleep "$SHORT_SLEEP" ;;
+      hard)
+        bump_transient "$idx"
+        emit "model $model HARD ERROR (auth/not-found/bad-request). strike ${transient_arr[$idx]}/${MAX_TRANSIENT}. See $TURN_OUT"
+        [ "${transient_arr[$idx]}" -ge "$MAX_TRANSIENT" ] && { emit "benching $model after $MAX_TRANSIENT hard errors — likely a config issue."; bench_model "$idx"; }
+        [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
+        sleep "$SHORT_SLEEP" ;;
+      timeout)
+        bump_transient "$idx"
+        local n=${transient_arr[$idx]} backoff=$(( SHORT_SLEEP * n ))
+        emit "model $model TIMEOUT (deadline-${TURN_TIMEOUT}s, no token/error). strike ${n}/${MAX_TRANSIENT}; backing off ${backoff}s."
+        [ "$n" -ge "$MAX_TRANSIENT" ] && { emit "benching $model after $MAX_TRANSIENT timeouts."; bench_model "$idx"; }
+        [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
+        sleep "$backoff" ;;
+      transient)
+        bump_transient "$idx"
+        local n=${transient_arr[$idx]} backoff=$(( SHORT_SLEEP * n ))
+        emit "model $model transient failure. strike ${n}/${MAX_TRANSIENT}; backing off ${backoff}s."
+        [ "$n" -ge "$MAX_TRANSIENT" ] && { emit "benching $model after $MAX_TRANSIENT transient failures."; bench_model "$idx"; }
+        [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
+        sleep "$backoff" ;;
+    esac
+  done
+
+  emit "ratchet END after $turn turn(s)."
+}
+
+main "$@"

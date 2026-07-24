@@ -1,0 +1,265 @@
+# =============================================================================
+#  commands.sh — ratchet init | new | doctor
+# =============================================================================
+#  The repo-contract tooling (v2 design). These turn ANY repo into a
+#  loop-runnable one and preflight it so a mis-onboarded repo fails in <1s
+#  instead of burning quota at turn 3. The engine stays task-agnostic: these
+#  only WRITE/VALIDATE the contract files; they never author business logic.
+#
+#  RATCHET_ROOT (the repo root of ratchet itself) must be exported by bin/ratchet
+#  before these run, so template files can be located.
+# =============================================================================
+
+# detect_verify_cmd DIR -> proposes a green gate from the stack. None => a stub.
+detect_verify_cmd() {
+  local d="$1"
+  if [ -f "$d/package.json" ]; then
+    if grep -q '"test"' "$d/package.json" 2>/dev/null; then printf 'npm test'
+    else printf 'node -e "console.log(1)"'; fi
+  elif [ -f "$d/mix.exs" ]; then printf 'mix test'
+  elif [ -f "$d/Cargo.toml" ]; then printf 'cargo test'
+  elif [ -f "$d/pyproject.toml" ] || [ -f "$d/pytest.ini" ]; then printf 'pytest -q'
+  elif [ -f "$d/Gemfile" ]; then printf 'bundle exec rspec'
+  elif [ -f "$d/go.mod" ]; then printf 'go test ./...'
+  else printf ''; fi
+}
+
+# stamp_protocol DIR TRACKER VERIFY STEP DONE -> write the managed marker block
+# into AGENTS.md (insert if absent, re-stamp if an older block exists).
+stamp_protocol() {
+  local dir="$1" tr="$2" vc="$3" st="$4" dt="$5" agents="$dir/AGENTS.md" tpl
+  tpl="$RATCHET_ROOT/templates/AGENTS.protocol.md"
+  [ -f "$tpl" ] || die "template missing: $tpl"
+  local block
+  block="$(sed -e "s|{{TRACKER_FILE}}|$tr|g" -e "s|{{VERIFY_CMD}}|$vc|g" \
+               -e "s|{{STEP_TOKEN}}|$st|g" -e "s|{{DONE_TOKEN}}|$dt|g" "$tpl")"
+  if [ -f "$agents" ] && grep -q 'ratchet-protocol:.*:begin' "$agents"; then
+    # re-stamp: replace from begin..end with the fresh block (preserves prose outside)
+    local tmp blockf; tmp=$(mktemp); blockf=$(mktemp)
+    printf '%s\n' "$block" > "$blockf"
+    awk -v blockfile="$blockf" '
+      /ratchet-protocol:.*:begin/ {while ((getline < blockfile) > 0) print; skip=1; next}
+      /ratchet-protocol:.*:end/   {skip=0; next}
+      !skip {print}
+    ' "$agents" > "$tmp" && mv "$tmp" "$agents" && rm -f "$blockf"
+  else
+    if [ -f "$agents" ]; then
+      printf '\n\n%s\n' "$block" >> "$agents"
+    else
+      printf '%s\n' "$block" > "$agents"
+    fi
+  fi
+}
+
+# ----------------------------- ratchet init ----------------------------------
+cmd_init() {
+  local dir="$1"
+  [ -d "$dir" ] || die "not a directory: $dir"
+  local conf="$dir/.ratchet.conf" trackers seed_vc
+  emit "ratchet init: $dir"
+
+  # 1) .ratchet.conf — copy the example then localize the detected verify cmd.
+  if [ ! -f "$conf" ]; then
+    cp "$RATCHET_ROOT/templates/ratchet.conf.example" "$conf"
+    seed_vc="$(detect_verify_cmd "$dir")"
+    if [ -n "$seed_vc" ]; then
+      emit "  detected stack -> VERIFY_CMD='$seed_vc'"
+      sed -i.tmp -e "s|^VERIFY_CMD=.*|VERIFY_CMD=$seed_vc|" "$conf" && rm -f "$conf.tmp"
+    else
+      emit "  no stack detected -> VERIFY_CMD left empty (set it; no-gate is loud by design)"
+    fi
+  else
+    emit "  .ratchet.conf exists — leaving it (re-stamp only)"
+  fi
+
+  # 2) parse it so we know the real tracker/tokens/verify.
+  parse_repo_conf "$conf" || { emit "  WARNING: .ratchet.conf has errors:"; printf '%b\n' "$RATCHET_CONF_ERRORS"; }
+  local tr="${TRACKER_FILE:-$(detect_tracker_file "$dir")}"
+  [ -n "$tr" ] || tr="PLAN.md"
+  local vc="${VERIFY_CMD:-$(detect_verify_cmd "$dir")}"
+
+  # 3) tracker — adopt an existing one, else seed from the template.
+  if [ ! -f "$dir/$tr" ]; then
+    cp "$RATCHET_ROOT/templates/PLAN.seed.md" "$dir/$tr"
+    emit "  seeded $tr (edit it, or run 'ratchet new' to draft from an idea)"
+  fi
+
+  # 4) LEARNINGS.md (advisory memory) if absent.
+  [ -f "$dir/LEARNINGS.md" ] || cp "$RATCHET_ROOT/templates/LEARNINGS.md" "$dir/LEARNINGS.md"
+
+  # 5) stamp the AGENTS.md protocol block (localized tracker/tokens/verify).
+  stamp_protocol "$dir" "$tr" "$vc" "$STEP_TOKEN" "$DONE_TOKEN"
+  emit "  stamped AGENTS.md protocol block (v$RATCHET_PROTOCOL_VERSION)"
+
+  # 6) .gitignore audit — keep loop junk out of commits.
+  if [ -f "$dir/.gitignore" ]; then
+    grep -qE '^\.ratchet/' "$dir/.gitignore" || printf '\n# ratchet runtime\n.ratchet/\n' >> "$dir/.gitignore"
+  else
+    printf '# ratchet runtime\n.ratchet/\n' > "$dir/.gitignore"
+  fi
+
+  # 7) record the conf hash so a later change is surfaced for human ack.
+  mkdir -p "$dir/.ratchet"; conf_hash "$conf" > "$dir/.ratchet/conf.hash"
+
+  emit "done. Next: review $tr, then 'ratchet doctor $dir' and 'ratchet run $dir'."
+}
+
+# ----------------------------- ratchet new -----------------------------------
+# Scaffold a fresh repo from an idea, draft PLAN.md, then STOP for the mandatory
+# human plan review (the one checkpoint the loop never skips).
+cmd_new() {
+  local idea="$1" dir="$2"
+  [ -n "$idea" ] || die "usage: ratchet new \"<idea>\" [DIR]"
+  local name; name="$(printf '%s' "$idea" | tr 'A-Z ' 'a-z-' | tr -cd 'a-z0-9-' | sed 's/^-*//; s/-*$//; s/-\{2,\}/-/g')"
+  [ -n "$name" ] || name="new-repo"
+  [ -n "$dir" ] || dir="$PWD/$name"
+  emit "ratchet new: '$idea' -> $dir"
+  mkdir -p "$dir" && cd "$dir" || die "cannot create $dir"
+  git init -q
+
+  # BRIEF.md (the goal/start/done/non-goals the human can refine).
+  cat > BRIEF.md <<BRIEF
+# Brief: $idea
+
+## What
+$idea
+
+## Definition of done
+- _(replace: what must be true for this to ship?)_
+
+## Non-goals
+- _(explicitly out of scope)_
+
+## Constraints / stack
+- _(language, runtime, target, anything load-bearing)_
+BRIEF
+
+  emit "  wrote BRIEF.md"
+  # Reuse init to stamp the contract files, then draft a PLAN.md.
+  cmd_init "$dir"
+
+  # Draft PLAN.md from the brief (this is the one "expensive" strong-model plan
+  # turn the public repo ships a minimal prompt for; it does NOT depend on any
+  # internal interview skill). Then STOP for human review.
+  cat > "$dir/PLAN.md" <<PLAN
+# Plan — $idea
+
+> Drafted from BRIEF.md. **Review this before running the loop** — this is the
+> one mandatory human checkpoint. Edit freely.
+
+## Milestone 0 — Walking skeleton + green gate
+- [ ] T0.1 (trivial) scaffold project from the constraints in BRIEF.md
+- [ ] T0.2 (normal) verify command is green (one passing walking-skeleton test)
+- [ ] T0.3 (normal) thinnest end-to-end slice
+
+## Milestone 1 — _(flesh out from the brief)_
+- [ ] T1.1 (normal) _(first real task toward the definition of done)_
+
+## Non-goals
+- _(copy from BRIEF.md)_
+PLAN
+  emit "  drafted PLAN.md"
+
+  git add -A && git commit -q -m "scaffold: $idea (ratchet new)" && emit "  initial commit"
+  emit ""
+  emit "STOP FOR PLAN REVIEW (mandatory human checkpoint):"
+  emit "  1. Open $dir/PLAN.md and $dir/BRIEF.md."
+  emit "  2. Edit the plan until Milestone 0 + the feature milestones are right."
+  emit "  3. Commit your edits, then:  ratchet doctor $dir && ratchet run $dir"
+}
+
+# ----------------------------- ratchet doctor --------------------------------
+# Fast static checks (<1s, auto before every run) + optional deep checks.
+cmd_doctor() {
+  local dir="$1" full="${2:-0}" problems=0 conf
+  conf="$dir/.ratchet.conf"
+  pr_ok() { printf '  ok   %s\n' "$1"; }
+  pr_fail() { printf '  FAIL %s\n' "$1"; problems=$((problems+1)); }
+
+  printf 'doctor: %s\n' "$dir"
+
+  # git repo
+  [ -d "$dir/.git" ] && pr_ok "git repo" || pr_fail "not a git repo"
+
+  # agent command on PATH (or an absolute path / pi)
+  if command -v "$AGENT_CMD" >/dev/null 2>&1 || [ -x "$AGENT_CMD" ]; then
+    pr_ok "agent command '$AGENT_CMD' on PATH"
+  else
+    pr_fail "agent command '$AGENT_CMD' not found (set AGENT_CMD / install it)"
+  fi
+
+  # conf parses + protocol supported
+  if [ -f "$conf" ]; then
+    if parse_repo_conf "$conf"; then
+      pr_ok ".ratchet.conf parses (allowlisted keys)"
+    else
+      pr_fail ".ratchet.conf has errors:"; printf '%b\n' "$RATCHET_CONF_ERRORS" | sed 's/^/         /'
+    fi
+    case "${RATCHET_PROTOCOL:-1}" in
+      1) pr_ok "RATCHET_PROTOCOL=$RATCHET_PROTOCOL_VERSION supported" ;;
+      *) pr_fail "RATCHET_PROTOCOL=$RATCHET_PROTOCOL unsupported (want $RATCHET_PROTOCOL_VERSION)" ;;
+    esac
+    # conf hash (surface a changed contract for human acknowledgment)
+    if [ -f "$dir/.ratchet/conf.hash" ]; then
+      cur="$(conf_hash "$conf")"; prev="$(cat "$dir/.ratchet/conf.hash")"
+      if [ "$cur" = "$prev" ]; then pr_ok ".ratchet.conf unchanged since onboarding"
+      else pr_fail ".ratchet.conf CHANGED since onboarding — review & re-acknowledge (run: ratchet init $dir)"; fi
+    fi
+  else
+    pr_fail "no .ratchet.conf (run: ratchet init $dir)"
+  fi
+
+  # protocol markers present + current in AGENTS.md
+  local agents="$dir/AGENTS.md"
+  if [ -f "$agents" ]; then
+    if grep -q "ratchet-protocol:v$RATCHET_PROTOCOL_VERSION:begin" "$agents"; then
+      pr_ok "AGENTS.md protocol markers current (v$RATCHET_PROTOCOL_VERSION)"
+    elif grep -q 'ratchet-protocol:.*:begin' "$agents"; then
+      pr_fail "AGENTS.md protocol is STALE (re-stamp: ratchet init $dir)"
+    else
+      pr_fail "AGENTS.md has no protocol markers (run: ratchet init $dir)"
+    fi
+  else
+    pr_fail "no AGENTS.md (run: ratchet init $dir)"
+  fi
+
+  # tracker exists, parses, has an open task
+  local tr="${TRACKER_FILE:-$(detect_tracker_file "$dir")}"
+  if [ -n "$tr" ] && [ -f "$dir/$tr" ]; then
+    TRACKER_FILE="$tr"; REPO_DIR="$dir"
+    if tracker_has_open; then pr_ok "tracker '$tr' has an open task"
+    else pr_fail "tracker '$tr' has NO open task (all done, or add work)"; fi
+  else
+    pr_fail "no tracker found (PLAN.md/TODO.md/TASKS.md) — run: ratchet init $dir"
+  fi
+
+  # VERIFY_CMD set (no-gate is loud, never silent)
+  if [ -n "$VERIFY_CMD" ]; then pr_ok "VERIFY_CMD is set: '$VERIFY_CMD'"
+  else pr_fail "VERIFY_CMD is EMPTY — set it in .ratchet.conf (no-gate is loud by design)"; fi
+
+  # tokens consistent between conf and stamped block
+  if [ -f "$agents" ] && grep -q "token \`$STEP_TOKEN\`" "$agents" && grep -q "token \`$DONE_TOKEN\`" "$agents"; then
+    pr_ok "tokens consistent (conf <-> AGENTS.md)"
+  else
+    pr_fail "tokens inconsistent — re-stamp (ratchet init $dir)"
+  fi
+
+  # secret-scan tool availability
+  if command -v gitleaks >/dev/null 2>&1; then pr_ok "gitleaks available (rich secret scan)"
+  else pr_ok "gitleaks missing — builtin pattern scan will run (install gitleaks for more)"; fi
+
+  if [ "$full" = 1 ]; then
+    echo "--- deep checks (--full) ---"
+    if [ -n "$VERIFY_CMD" ]; then
+      printf '  VERIFY_CMD ... '; local t0 t1 rc
+      t0=$SECONDS; ( cd "$dir" && eval "$VERIFY_CMD" ) >/dev/null 2>&1; rc=$?; t1=$SECONDS
+      if [ "$rc" = 0 ]; then printf 'GREEN in %ss\n' "$((t1-t0))"
+      else printf 'RED in %ss (the loop will make it green first)\n' "$((t1-t0))"; fi
+    fi
+  fi
+
+  echo "---"
+  if [ "$problems" = 0 ]; then printf 'doctor: OK — repo is loop-ready.\n'
+  else printf 'doctor: %d problem(s). Fix before running the loop.\n' "$problems"; fi
+  return "$problems"
+}

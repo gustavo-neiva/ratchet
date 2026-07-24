@@ -1,0 +1,125 @@
+# =============================================================================
+#  observability.sh — excerpts, live watch, and baseline metrics
+# =============================================================================
+#  Every turn is narrated to the terminal AND loop.log. While a turn runs you
+#  get a heartbeat; after it finishes you get an excerpt of what the agent said.
+#  `ratchet watch` (2nd terminal) pretty-prints the live session JSONL the agent
+#  writes. `ratchet stats` parses loop.log into the baseline metrics.
+# =============================================================================
+
+# print_new_bytes OFFVAR -> tail new bytes written to TURN_OUT since last offset.
+# Uses byte offsets so it works on bash 3.2 with no external deps.
+print_new_bytes() {
+  local offvar="$1" sz
+  sz=$(wc -c <"$TURN_OUT" 2>/dev/null | tr -d ' '); sz=${sz:-0}
+  off=${!offvar:-0}
+  if [ "$sz" -gt "$off" ]; then
+    tail -c "+$((off+1))" "$TURN_OUT" 2>/dev/null | flow
+  fi
+  printf -v "$offvar" '%s' "$sz"
+}
+
+# show_excerpt -> echo the last TAIL_LINES of the agent's output.
+show_excerpt() {
+  [ "${TAIL_LINES:-0}" -gt 0 ] || return 0
+  [ -s "$TURN_OUT" ] || return 0
+  emit "--- agent output (last ${TAIL_LINES} lines) ---"
+  tail -n "$TAIL_LINES" "$TURN_OUT" 2>/dev/null | flow
+  emit "---"
+}
+
+# session_dir_for DIR -> the directory the agent CLI stores its sessions under.
+# For pi this is ~/.pi/agent/sessions/<encoded-path>. Used by --watch + sanitize.
+session_dir_for() {
+  local dir="$1" enc
+  enc="-$(printf '%s' "$dir" | sed 's:/:-:g')--"
+  printf '%s/.pi/agent/sessions/%s' "$HOME" "$enc"
+}
+
+# watch_session -> pretty-print the live session JSONL (run via `ratchet watch`).
+# Falls back to raw tail if jq is missing. Exits on Ctrl-C; the loop keeps running.
+watch_session() {
+  local sdir f
+  sdir=$(session_dir_for "$REPO_DIR")
+  f=$(ls -t "$sdir"/*"_${SESSION_ID}.jsonl" 2>/dev/null | head -n1)
+  if [ -z "$f" ]; then
+    emit "watch: no session yet for id '${SESSION_ID}' under ${sdir}"
+    emit "watch: start the loop first (it creates the session on turn 1), then re-run watch."
+    return 1
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    emit "watch: jq not found — falling back to raw tail."
+    emit "watching: $f"
+    exec tail -n 40 -f "$f"
+  fi
+  emit "watching live: $f"
+  emit "(Ctrl-C to stop watching; the loop keeps running)"
+  emit "------------------------------------------------------------"
+  tail -n 60 -f "$f" | jq -rj --unbuffered '
+    select(.type=="message") | .message as $m | (.timestamp // "") as $ts |
+    ($ts[11:19]) as $clock |
+    if $m.role=="user" then
+      "\u001b[36m[\($clock)] > you:\u001b[0m \(($m.content[0].text // "")[0:200] | gsub("\n";" "))\n"
+    elif $m.role=="assistant" then
+      ([ $m.content[]? |
+        if .type=="thinking" then "  \u001b[90m.. \((.thinking//"")[0:200] | gsub("\n";" "))\u001b[0m"
+        elif .type=="text" then (if ((.text//"")|length)>0 then "  \u001b[97m\((.text//"")[0:240] | gsub("\n";" "))\u001b[0m" else empty end)
+        elif .type=="toolCall" then
+          "  \u001b[33m>> \(.name)\u001b[0m " +
+          ( .arguments as $a | if (.name=="bash") then (($a.command // "")[0:200] | gsub("\n";" "))
+            elif (.name|test("read|write|edit|ls|find|grep")) then (($a.path // ($a|tostring))[0:200])
+            else ($a|tostring|.[0:160]) end )
+        else empty end ] | map(select(.!=null)) | join("\n")) + "\n"
+    elif $m.role=="toolResult" then
+      "  \u001b[32m<- \u001b[0m\u001b[90m\((([ $m.content[]? | select(.type=="text") | .text ] | join(" ") // "")[0:160] | gsub("\n";" "))\u001b[0m\n"
+    else empty end'
+}
+
+# cmd_stats -> parse loop.log into the baseline metrics (step-success rate,
+# wasted wall-hours per 100 turns, % turns on the cheap/first model).
+cmd_stats() {
+  [ -f "$LOOP_LOG" ] || die "no loop.log found at $LOOP_LOG (nothing run here yet?)"
+  command -v python3 >/dev/null 2>&1 || die "stats requires python3"
+  local cheap_model="${models_arr[0]:-<first-model>}"
+  python3 - "$LOOP_LOG" "$cheap_model" <<'PY'
+import re, sys, datetime
+path, cheap_model = sys.argv[1], sys.argv[2]
+ts_re = re.compile(r'^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] (.*)$')
+turn_re = re.compile(r'^--- turn (\d+) \| model=(\S+) ---$')
+def parse_ts(s): return datetime.datetime.strptime(s, '%Y-%m-%d %H:%M:%S')
+turns=cheap=steps=dones=dl_kills=exhausted=hard=transient=timeout=0
+wasted=0.0; cur_ts=None; benched_ts=None
+with open(path, encoding='utf-8', errors='replace') as fh:
+    for raw in fh:
+        m=ts_re.match(raw.rstrip('\n'))
+        if not m: continue
+        ts=parse_ts(m.group(1)); rest=m.group(2); tm=turn_re.match(rest)
+        if tm:
+            turns+=1
+            if tm.group(2)==cheap_model: cheap+=1
+            if benched_ts is not None:
+                wasted+=(ts-benched_ts).total_seconds(); benched_ts=None
+            cur_ts=ts; continue
+        if 'terminating' in rest and 'deadline' in rest:
+            dl_kills+=1
+            if cur_ts is not None: wasted+=(ts-cur_ts).total_seconds()
+            continue
+        if 'step complete' in rest: steps+=1
+        elif rest.startswith('agent signaled'): dones+=1
+        elif 'EXHAUSTED' in rest: exhausted+=1
+        elif 'HARD ERROR' in rest: hard+=1
+        elif 'TIMEOUT (deadline' in rest: timeout+=1
+        elif 'transient failure' in rest: transient+=1
+        elif rest.startswith('ALL models benched'): benched_ts=ts
+succ=steps+dones; att=succ+hard+transient+timeout
+sr=(succ/att*100.0) if att else 0.0
+wh=wasted/3600.0; wp=(wh/turns*100.0) if turns else 0.0; cp=(cheap/turns*100.0) if turns else 0.0
+print(f"turns started         : {turns}")
+print(f"  on cheap ({cheap_model}): {cheap} ({cp:.0f}%)")
+print(f"successes (step+done) : {succ}  (steps={steps} done={dones})")
+print(f"failures              : hard={hard} transient={transient} timeout={timeout} exhausted={exhausted}")
+print(f"step-success rate     : {sr:.0f}%")
+print(f"deadline kills        : {dl_kills}")
+print(f"wasted wall-hours     : {wh:.2f}h  ({wp:.2f}h per 100 turns)")
+PY
+}

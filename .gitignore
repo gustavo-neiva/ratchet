@@ -1,0 +1,23 @@
+# ratchet runtime
+.ratchet/
+*.log
+
+# OS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Editor
+.vscode/
+.idea/
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+
+# Temp
+*.tmp
+.tmp/
