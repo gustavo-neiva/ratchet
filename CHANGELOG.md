@@ -4,6 +4,15 @@ All notable changes to ratchet will be documented in this file.
 
 ## [Unreleased]
 
+### Added (v1.1 - Tiered Model Routing)
+- ✅ Three-tier routing: PLAN (drafting), BUILD (normal/hard), LIGHT (trivial)
+- ✅ `ratchet plan` command for plan-drafting turns
+- ✅ Per-tier model chains and thinking levels
+- ✅ Tier statistics in `ratchet stats`
+- ✅ Parity audit documenting autonomous_loop.sh equivalents
+- ✅ `--cheap` flag to force all tiers to LIGHT chain
+- ✅ Turn observability: tier, task ID, duration, progress
+
 ### Added (v1 - Core Bash Implementation)
 - ✅ Complete bash core with all essential modules
 - ✅ Commands: `run`, `once`, `init`, `new`, `doctor`, `selftest`, `stats`, `watch`

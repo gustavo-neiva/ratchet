@@ -120,6 +120,36 @@ Ephemeral turns are the DEFAULT: `--no-session --no-extensions` each turn. The t
 
 This is how it survives unattended overnight runs.
 
+### Tiered model routing
+
+Route turns by task complexity — heavy models for planning/building, cheap models for trivial work:
+
+| Tier | Config keys | Used for | Example |
+|---|---|---|
+| PLAN  | `PLAN_MODELS`, `THINKING_PLAN`   | plan-drafting turns only (`ratchet plan`, `ratchet new`) | `anthropic/claude-fable-5,anthropic/claude-opus-4-8` |
+| BUILD | `BUILD_MODELS`, `THINKING_BUILD` | `normal` and `hard` tasks (heavy lifting) | `anthropic/claude-sonnet-4-5,zai/glm-5.2` |
+| LIGHT | `LIGHT_MODELS`, `THINKING_LIGHT` | `trivial` tasks (search, data collection, mechanical edits) | `zai/glm-5-turbo,zai/glm-4.5-air` with `THINKING_LIGHT=off` |
+
+**Fallback semantics:** Any tier key unset → that tier falls back to the flat `MODELS` chain and global `THINKING`. Tag tasks in `PLAN.md` with `(trivial)`, `(normal)`, or `(hard)` to route them.
+
+**Example `.ratchet.conf`:**
+
+```ini
+# Tiered routing: strong models for plans, sonnet for builds, cheap for trivial
+PLAN_MODELS="anthropic/claude-fable-5,anthropic/claude-opus-4-8"
+THINKING_PLAN="high"
+
+BUILD_MODELS="anthropic/claude-sonnet-4-5,zai/glm-5.2"
+THINKING_BUILD="medium"
+
+LIGHT_MODELS="zai/glm-5-turbo"
+THINKING_LIGHT="off"
+
+# Flat fallback when tiers unset
+MODELS="anthropic/claude-sonnet-4-5,zai/glm-5.2"
+THINKING="medium"
+```
+
 ## Installation
 
 ```bash

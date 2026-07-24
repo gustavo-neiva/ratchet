@@ -53,13 +53,13 @@ but bump thinking one notch above `THINKING_BUILD` (max `high`) unless
 ## Milestone 2 — plan turns on existing repos (serial)
 
 - [x] T2.1 (hard, serial) `ratchet plan [REPO]` command: run ONE turn using the PLAN tier (chain_for_tier plan) with a plan-drafting prompt: read the repo, read PLAN.md, draft/refresh open tasks (Milestone-0-walking-skeleton rule, tags on every task), then STOP with a loud "HUMAN: review PLAN.md before running". Never auto-runs the loop after. Reuse the plan-turn machinery from `ratchet new` (extract shared function if needed — smallest possible refactor). Selftest with fake agent: `plan` invokes exactly one turn and does not commit code changes outside PLAN.md/LEARNINGS.md.
-- [IN PROGRESS] T2.2 (normal, serial) `ratchet stats`: extend `cmd_stats` (the embedded python in `lib/observability.sh`) to count turns per tier and per model from the `turn N | tier=X | model=Y` log lines (old logs without tier lines must not break stats). Selftest: stats on a fixture log with and without tier lines.
+- [x] T2.2 (normal, serial) `ratchet stats`: extend `cmd_stats` (the embedded python in `lib/observability.sh`) to count turns per tier and per model from the `turn N | tier=X | model=Y` log lines (old logs without tier lines must not break stats). Selftest: stats on a fixture log with and without tier lines.
 
 ## Milestone 3 — docs + parity follow-ups (parallel-safe)
 
-- [ ] T3.1 (trivial) README.md: add a "Tiered model routing" section with the design table above and a copy-paste `.ratchet.conf` example (fable/opus plan, sonnet/glm build, glm-turbo light with thinking off).
-- [ ] T3.2 (trivial) CHANGELOG.md: add v1.1 entry (tiered routing, `ratchet plan`, tier stats, parity audit).
-- [ ] T3.3 (trivial) templates: add the six commented tier keys to the `.ratchet.conf` template stamped by `ratchet init`.
+- [x] T3.1 (trivial) README.md: add a "Tiered model routing" section with the design table above and a copy-paste `.ratchet.conf` example (fable/opus plan, sonnet/glm build, glm-turbo light with thinking off).
+- [x] T3.2 (trivial) CHANGELOG.md: add v1.1 entry (tiered routing, `ratchet plan`, tier stats, parity audit).
+- [IN PROGRESS] T3.3 (trivial) templates: add the six commented tier keys to the `.ratchet.conf` template stamped by `ratchet init`.
 - (T0.2 may append parity-gap tasks here.)
 
 ## Milestone 4 — run health & correctness (serial: found in the 2026-07-24 run postmortem)

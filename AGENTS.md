@@ -22,27 +22,3 @@ Tracker grammar: status `[ ]` open · `[IN PROGRESS]` · `[x]` done, plus an
 optional id and optional tags `(trivial|normal|hard)` and/or `serial`. Example:
 `- [ ] T1.2 (normal, serial) design the schema`.
 <!-- ratchet-protocol:v1:end -->
-
-## Project notes
-
-<!-- Add per-project rules, glossary, and conventions BELOW this line. Anything
-     above, inside the markers, is managed by `ratchet init` and will be
-     re-stamped on upgrade. -->
-
-## Project notes
-
-<!-- Add per-project rules, glossary, and conventions BELOW this line. Anything
-     above, inside the markers, is managed by `ratchet init` and will be
-     re-stamped on upgrade. -->
-
-## Project notes
-
-<!-- Add per-project rules, glossary, and conventions BELOW this line. Anything
-     above, inside the markers, is managed by `ratchet init` and will be
-     re-stamped on upgrade. -->
-
-## Project notes
-
-<!-- Add per-project rules, glossary, and conventions BELOW this line. Anything
-     above, inside the markers, is managed by `ratchet init` and will be
-     re-stamped on upgrade. -->
