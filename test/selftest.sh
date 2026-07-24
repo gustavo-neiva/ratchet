@@ -245,9 +245,41 @@ red_commits=$(git -C "$tmp" log --oneline 2>/dev/null | grep -c 'auto(ratchet): 
 if [ "$red_commits" = "0" ]; then ok "RED verify blocked the commit (no green, no commit)"
 else fail "RED turn was committed ($red_commits) — green gate failed"; fi
 
+# Doctor tier warning test (new in v1.1)
+echo ""
+echo "== suite 8: doctor tier warning (LIGHT_MODELS without THINKING_LIGHT=off) =="
+tmp_doc="$(mktemp -d)"
+trap 'rm -rf "$tmp_doc"' EXIT
+cat > "$tmp_doc/PLAN.md" <<'EOF'
+# Test plan
+- [ ] T1 (trivial) task
+EOF
+cat > "$tmp_doc/verify.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$tmp_doc/verify.sh"
+cat > "$tmp_doc/.ratchet.conf" <<'EOF'
+RATCHET_PROTOCOL=1
+TRACKER_FILE=PLAN.md
+VERIFY_CMD=./verify.sh
+LIGHT_MODELS=fake/light
+THINKING_LIGHT=low
+EOF
+"$RATCHET" init "$tmp_doc" >/dev/null 2>&1
+git -C "$tmp_doc" init -q >/dev/null 2>&1
+git -C "$tmp_doc" add -A
+git -C "$tmp_doc" commit -q -m "baseline" >/dev/null 2>&1
+# Run doctor and check for the warning
+if "$RATCHET" doctor "$tmp_doc" 2>&1 | grep -q 'WARN.*LIGHT_MODELS.*THINKING_LIGHT.*off'; then
+  ok "doctor warns when LIGHT_MODELS set without THINKING_LIGHT=off"
+else
+  fail "doctor did not warn about LIGHT_MODELS/THINKING_LIGHT mismatch"
+fi
+
 # Tier routing end-to-end tests (new in v1.1)
 echo ""
-echo "== suite 8: tier routing end-to-end (unset keys, trivial tag) =="
+echo "== suite 9: tier routing end-to-end (unset keys, trivial tag) =="
 tmp2="$(mktemp -d)"
 trap 'rm -rf "$tmp2"' EXIT
 

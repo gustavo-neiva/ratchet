@@ -248,6 +248,43 @@ cmd_doctor() {
   if command -v gitleaks >/dev/null 2>&1; then pr_ok "gitleaks available (rich secret scan)"
   else pr_ok "gitleaks missing — builtin pattern scan will run (install gitleaks for more)"; fi
 
+  # tier routing configuration display
+  echo "---"
+  echo "tier routing:"
+  local plan_chain build_chain light_chain plan_think build_think light_think
+  plan_chain=$(chain_for_tier "plan")
+  build_chain=$(chain_for_tier "build")
+  light_chain=$(chain_for_tier "light")
+  plan_think=$(thinking_for_tier "plan")
+  build_think=$(thinking_for_tier "build")
+  light_think=$(thinking_for_tier "light")
+  
+  # Display plan tier
+  if [ -n "$PLAN_MODELS" ]; then
+    printf '  PLAN  : %s (thinking=%s)\n' "$plan_chain" "$plan_think"
+  else
+    printf '  PLAN  : → MODELS (flat) (thinking=%s)\n' "$plan_think"
+  fi
+  
+  # Display build tier
+  if [ -n "$BUILD_MODELS" ]; then
+    printf '  BUILD : %s (thinking=%s)\n' "$build_chain" "$build_think"
+  else
+    printf '  BUILD : → MODELS (flat) (thinking=%s)\n' "$build_think"
+  fi
+  
+  # Display light tier
+  if [ -n "$LIGHT_MODELS" ]; then
+    printf '  LIGHT : %s (thinking=%s)\n' "$light_chain" "$light_think"
+  else
+    printf '  LIGHT : → MODELS (flat) (thinking=%s)\n' "$light_think"
+  fi
+  
+  # Warning: LIGHT_MODELS set but THINKING_LIGHT not "off"
+  if [ -n "$LIGHT_MODELS" ] && [ "$light_think" != "off" ]; then
+    printf '  WARN : LIGHT_MODELS set but THINKING_LIGHT is not "off" (cheap tier should not reason)\n'
+  fi
+
   if [ "$full" = 1 ]; then
     echo "--- deep checks (--full) ---"
     if [ -n "$VERIFY_CMD" ]; then
