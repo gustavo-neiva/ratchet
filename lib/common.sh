@@ -157,6 +157,11 @@ Commands:
   selftest         Verify detection + loop logic against fixtures (NO agent calls). Exits 0/1.
   stats   [REPO]  Parse this repo's loop.log and print the baseline metrics, then exit.
   watch   [REPO]  Pretty-print the live session JSONL the agent writes (run in a 2nd terminal).
+  models          Model config UX: list | add <provider/id> | remove <provider/id> |
+                  thinking <level>. Flags: --tier models|plan|build|light (default:
+                  models), --pos first|last|N, --repo (edit .ratchet.conf instead of
+                  the global conf), --force (skip pi-registry validation). Ids are
+                  validated against 'pi --list-models' (24h cache; doctor warns too).
 
 Options:
   -d, --dir DIR          Repo directory (default: \$PWD). A bare positional works too.

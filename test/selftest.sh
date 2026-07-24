@@ -44,6 +44,7 @@ STEP_TOKEN="STEP_COMPLETE"; DONE_TOKEN="ALL_DONE"
 . "$RR/lib/contract.sh"
 . "$RR/lib/model-fallback.sh"     # tier routing
 . "$RR/lib/commands.sh"           # cmd_status
+. "$RR/lib/models.sh"             # ratchet models (chain ops, upsert, registry)
 
 echo "== suite 1: turn classification =="
 check_class() {  # NAME EXPECTED STRING
@@ -870,6 +871,93 @@ else
   fail "FANOUT=scout + normal: scout env exported on a non-hard task (see $tmpf3/run.log)"
 fi
 rm -rf "$tmpf3"
+
+echo ""
+echo "== suite 17: ratchet models (chain ops, conf upsert, registry, cmd) =="
+
+check_eq() { # NAME GOT WANT
+  [ "$2" = "$3" ] && ok "$1" || fail "$1 -> got='$2' want='$3'"
+}
+
+# chain_add: append / first / positional / move-existing
+check_eq "chain_add to empty"        "$(chain_add "" "a/b")"                 "a/b"
+check_eq "chain_add append"          "$(chain_add "a/b,c/d" "e/f")"         "a/b,c/d,e/f"
+check_eq "chain_add first"           "$(chain_add "a/b,c/d" "e/f" first)"   "e/f,a/b,c/d"
+check_eq "chain_add pos 2"           "$(chain_add "a/b,c/d" "e/f" 2)"       "a/b,e/f,c/d"
+check_eq "chain_add pos past end"    "$(chain_add "a/b" "e/f" 9)"           "a/b,e/f"
+check_eq "chain_add move-existing"   "$(chain_add "a/b,c/d" "c/d" first)"   "c/d,a/b"
+
+# chain_remove
+check_eq "chain_remove head"         "$(chain_remove "a/b,c/d" "a/b")"       "c/d"
+check_eq "chain_remove absent"       "$(chain_remove "a/b" "x/y")"           "a/b"
+
+# parse_pi_models: header skipped, provider/id joined
+check_eq "parse pi table" "$(printf 'provider     model              context  max-out\nzai          glm-5.2            1M       131K\nkimi-coding  k3                 262K     32K\n' | parse_pi_models)" "zai/glm-5.2
+kimi-coding/k3"
+
+# upsert_conf_key: replaces active line, leaves comments + commented template lines
+tmpm="$(mktemp -d)"
+printf '# header\nMODELS=a/b\n#PLAN_MODELS=x/y\n' > "$tmpm/conf"
+upsert_conf_key "$tmpm/conf" MODELS "c/d,e/f"
+grep -qx 'MODELS=c/d,e/f' "$tmpm/conf" && grep -qx '# header' "$tmpm/conf" && grep -qx '#PLAN_MODELS=x/y' "$tmpm/conf" \
+  && ok "upsert replaces line, preserves comments" || fail "upsert replace (see $tmpm/conf)"
+upsert_conf_key "$tmpm/conf" LIGHT_MODELS "z/g"
+[ "$(tail -1 "$tmpm/conf")" = 'LIGHT_MODELS=z/g' ] && ok "upsert appends missing key" || fail "upsert append"
+[ "$(grep -c '^#PLAN_MODELS' "$tmpm/conf")" = 1 ] && ok "upsert ignores commented template line" || fail "upsert touched commented line"
+
+# end-to-end cmd_models with a fake pi on PATH (registry = 2 models)
+tmpp="$(mktemp -d)"
+cat > "$tmpp/pi" <<'EOF'
+#!/usr/bin/env bash
+cat <<'T'
+provider     model              context  max-out  thinking  images
+zai          glm-5.2            1M       131K     yes       no
+zai          glm-5-turbo        200K     131K     yes       no
+T
+EOF
+chmod +x "$tmpp/pi"
+
+rm -f "$RATCHET_HOME/conf" "$RATCHET_HOME/models.registry"
+PATH="$tmpp:$PATH" "$RATCHET" models add zai/glm-5.2 --tier light >"$tmpm/add.log" 2>&1 \
+  && grep -qx 'LIGHT_MODELS=zai/glm-5.2' "$RATCHET_HOME/conf" \
+  && ok "models add writes LIGHT_MODELS to global conf" || fail "models add (see $tmpm/add.log)"
+
+PATH="$tmpp:$PATH" "$RATCHET" models add zai/glm-5-turbo --tier light --pos first >/dev/null 2>&1 \
+  && grep -qx 'LIGHT_MODELS=zai/glm-5-turbo,zai/glm-5.2' "$RATCHET_HOME/conf" \
+  && ok "models add --pos first prepends" || fail "models add --pos first"
+
+PATH="$tmpp:$PATH" "$RATCHET" models remove zai/glm-5.2 --tier light >/dev/null 2>&1 \
+  && grep -qx 'LIGHT_MODELS=zai/glm-5-turbo' "$RATCHET_HOME/conf" \
+  && ok "models remove" || fail "models remove"
+
+if PATH="$tmpp:$PATH" "$RATCHET" models add zai/nope >/dev/null 2>&1; then
+  fail "models add unknown id should be refused"
+else
+  ok "models add refuses unknown id"
+fi
+PATH="$tmpp:$PATH" "$RATCHET" models add zai/nope --force >/dev/null 2>&1 \
+  && grep -q 'zai/nope' "$RATCHET_HOME/conf" \
+  && ok "models add --force overrides registry" || fail "models add --force"
+
+PATH="$tmpp:$PATH" "$RATCHET" models thinking off --tier light >/dev/null 2>&1 \
+  && grep -qx 'THINKING_LIGHT=off' "$RATCHET_HOME/conf" \
+  && ok "models thinking writes THINKING_LIGHT" || fail "models thinking"
+
+PATH="$tmpp:$PATH" "$RATCHET" models list >"$tmpm/list.log" 2>&1 \
+  && grep -q 'LIGHT' "$tmpm/list.log" && grep -q 'zai/glm-5-turbo \[ok\]' "$tmpm/list.log" && grep -q 'zai/nope \[UNKNOWN\]' "$tmpm/list.log" \
+  && ok "models list shows chains with registry marks" || fail "models list (see $tmpm/list.log)"
+
+# --repo: edit the repo contract + re-stamp conf.hash (ratchet's own edit is not tampering)
+rm -f "$RATCHET_HOME/conf"   # clean global so the repo chain starts empty
+git -C "$tmpm" init -q; mkdir -p "$tmpm/.ratchet"
+printf 'RATCHET_PROTOCOL=1\nTRACKER_FILE=PLAN.md\nVERIFY_CMD=true\n' > "$tmpm/.ratchet.conf"
+conf_hash "$tmpm/.ratchet.conf" > "$tmpm/.ratchet/conf.hash"
+PATH="$tmpp:$PATH" "$RATCHET" models add zai/glm-5.2 --repo -d "$tmpm" >/dev/null 2>&1 \
+  && grep -qx 'MODELS=zai/glm-5.2' "$tmpm/.ratchet.conf" \
+  && [ "$(conf_hash "$tmpm/.ratchet.conf")" = "$(cat "$tmpm/.ratchet/conf.hash")" ] \
+  && ok "models add --repo edits contract + re-stamps hash" || fail "models add --repo"
+
+rm -rf "$tmpp" "$tmpm"
 
 rm -rf "$RATCHET_HOME"   # isolated test home (see top of file)
 

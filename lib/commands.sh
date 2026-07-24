@@ -438,6 +438,23 @@ cmd_doctor() {
   if command -v gitleaks >/dev/null 2>&1; then pr_ok "gitleaks available (rich secret scan)"
   else pr_ok "gitleaks missing — builtin pattern scan will run (install gitleaks for more)"; fi
 
+  # configured models exist in pi's registry (typo/churn guard). Uses the
+  # 24h cache ONLY — doctor runs before every loop and `pi --list-models`
+  # costs ~3s; refresh via `ratchet models list`.
+  local _reg=""
+  _registry_fresh && _reg="$(pi_model_registry)"
+  if [ -n "$_reg" ]; then
+    local _bad="" _m
+    for _m in $(printf '%s' "$MODELS $PLAN_MODELS $BUILD_MODELS $LIGHT_MODELS" | tr ', ' '\n\n' | sort -u); do
+      [ -n "$_m" ] || continue
+      printf '%s\n' "$_reg" | grep -qxF "$_m" || _bad="$_bad $_m"
+    done
+    if [ -z "$_bad" ]; then pr_ok "all configured models exist in pi registry"
+    else pr_fail "unknown model(s):$_bad (not in 'pi --list-models' — typo or churned id; fix: ratchet models remove/add)"; fi
+  else
+    pr_ok "pi registry cache missing/stale — model validation skipped (refresh: ratchet models list)"
+  fi
+
   # tier routing configuration display
   echo "---"
   echo "tier routing:"

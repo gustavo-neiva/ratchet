@@ -4,6 +4,12 @@ All notable changes to ratchet will be documented in this file.
 
 ## [Unreleased]
 
+### Added (v1.2 - Model config UX)
+- ✅ `ratchet models` command family: `list` (effective chains with registry ✓/UNKNOWN marks), `add`/`remove` (`--tier`, `--pos first|last|N`, `--repo`, `--force`), `thinking`
+- ✅ Every added id validated against `pi --list-models` (24h cache in `$RATCHET_HOME/models.registry`); unknown ids refused unless `--force`
+- ✅ `ratchet doctor` fails on configured models missing from the registry cache (typo/churn guard, preflight before any quota burns)
+- ✅ Conf write-back upserts a single `KEY=value` line, preserving all comments; `--repo` edits re-stamp the doctor conf-hash
+
 ### Added (v1.1 - Tiered Model Routing)
 - ✅ Three-tier routing: PLAN (drafting), BUILD (normal/hard), LIGHT (trivial)
 - ✅ `ratchet plan` command for plan-drafting turns

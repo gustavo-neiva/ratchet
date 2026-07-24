@@ -152,6 +152,27 @@ MODELS="anthropic/claude-sonnet-4-5,zai/glm-5.2"
 THINKING="medium"
 ```
 
+### Editing model chains (`ratchet models`)
+
+Model ids churn fast (glm 5.1→5.2, sonnet 4.5→4.6, new providers). Instead of
+hand-editing comma strings, use `ratchet models` — every id is validated
+against pi's live registry (`pi --list-models`, 24h cache) before it lands:
+
+```bash
+ratchet models list                                  # effective chains, ✓/UNKNOWN per model
+ratchet models add kimi-coding/k3 --pos last         # append to MODELS (global conf)
+ratchet models add zai/glm-5-turbo --tier light --pos first
+ratchet models remove zai/glm-5.1 --tier light       # churned id out
+ratchet models thinking off --tier light             # cheap tier shouldn't reason
+ratchet models add anthropic/claude-opus-4-8 --tier plan --repo   # repo contract
+```
+
+Edits target the global `~/.ratchet/conf` by default, `--repo` targets the repo's
+`.ratchet.conf` (and re-stamps the doctor conf-hash, so ratchet's own edit is
+never flagged as tampering). `add` on an id already in the chain moves it —
+`add X --pos 2` is also your reorder. Unknown ids are refused (`--force`
+overrides); `doctor` fails on configured ids missing from the registry cache.
+
 ### Cross-repo parallelism (Tier 0 — free throughput)
 
 Launch N `ratchet` processes on N independent repos. Already supported via `--dir`.
@@ -202,6 +223,7 @@ doctor [REPO]   Preflight checks
 selftest        Verify logic against fixtures (no API calls)
 stats   [REPO]  Parse loop.log and print metrics
 watch   [REPO]  Pretty-print live session JSONL (2nd terminal)
+models          List/add/remove/validate model chains (--tier, --pos, --repo)
 ```
 
 ## Options

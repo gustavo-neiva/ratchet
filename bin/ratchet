@@ -25,7 +25,7 @@ RATCHET_ROOT="$(cd -P "$(dirname "$_src")/.." && pwd)"
 unset _src _dir
 export RATCHET_ROOT
 
-for _mod in common contract tracker classify model-fallback \
+for _mod in common contract tracker classify model-fallback models \
             commit-gate session-sanitize observability run-turn commands; do
   # shellcheck disable=SC1090
   . "$RATCHET_ROOT/lib/${_mod}.sh"
@@ -46,7 +46,7 @@ pre_scan() {
       -p|--prompt|-s|--session|-m|--models|--thinking|--turn-timeout|--cooldown|\
       --both-wait|--step-token|--done-token|--verify-cmd|--agent-cmd|\
       --cache-retention|--tail|--heartbeat) shift 2;;
-      init|new|plan|doctor|run|once|selftest|stats|watch|status)
+      init|new|plan|doctor|run|once|selftest|stats|watch|status|models)
         [ -z "$COMMAND" ] && COMMAND="$1"; shift;;
       -*) shift;;
       *)
@@ -150,6 +150,18 @@ main() {
       emit "WARNING: $REPO_DIR/.ratchet.conf has issues (run 'ratchet doctor'):" >&2
       printf '%b\n' "$RATCHET_CONF_ERRORS" >&2
     fi
+  fi
+
+  # 2.5) `ratchet models` is config tooling, not a loop run — it parses its
+  # own args (model ids, --tier/--pos) which parse_args would reject. Runs
+  # after the conf load so `list` shows the effective chains.
+  if [ "$COMMAND" = "models" ]; then
+    _margs=(); _mseen=0
+    for _a in "$@"; do
+      if [ "$_mseen" = 0 ] && [ "$_a" = "models" ]; then _mseen=1; continue; fi
+      _margs+=("$_a")
+    done
+    cmd_models "${_margs[@]+"${_margs[@]}"}"; exit $?
   fi
 
   # 3) CLI flags win (authoritative parse).

@@ -97,6 +97,16 @@ but bump thinking one notch above `THINKING_BUILD` (max `high`) unless
 - [x] T6.6 (trivial) docs/comparison.md: the §1.2 competitor table from docs/STRATEGY.md (looper, loop-harness, ouro-loop), one paragraph per differentiator. Link from README.
 - [x] T6.7 (trivial) README repositioning: lead with 'survives provider rate limits + never commits a red tree'; add the 'zero deps' footnote (loop core is bash-only; `stats` needs python3, `watch` prefers jq).
 
+## Milestone 7 — model config UX (`ratchet models`) (done by hand, 2026-07-24)
+
+> Pain: model ids churn (3 providers, weekly renames); chains were hand-typed
+> comma strings in the global conf + N repo confs with zero validation — typos
+> surfaced as burned turns. TUI deferred (ponytail: the CLI covers it).
+
+- [x] T7.1 (normal, serial) `lib/models.sh` + `ratchet models list|add|remove|thinking`: chain ops (`chain_add` doubles as move), conf upsert preserving comments, `--tier/--pos/--repo/--force`, validated against `pi --list-models` (24h cache — the call costs ~3s, too slow for uncached doctor use). `--repo` re-stamps the doctor conf-hash. Selftest suite 17 (21 cases). 118/118.
+- [x] T7.2 (trivial, serial) `ratchet doctor`: FAIL on configured ids missing from the registry cache (typo/churn guard at preflight); skips cleanly when the cache is missing/stale.
+- [ ] T7.3 (trivial) `ratchet models sync`: scan confs for churned ids, suggest replacements by prefix. YAGNI until the first real rename hurts.
+
 ## How to finish this plan (dogfood — ratchet builds ratchet)
 
 Everything still open is loop-work. Order is top-down as written: M2 (plan
