@@ -20,6 +20,12 @@ RR="$(cd "$(dirname "$0")/.." && pwd)"     # ratchet repo root
 RATCHET="$RR/bin/ratchet"
 FAKE="$RR/test/fixtures/fake-agent"
 
+# Isolate ALL test runs from the real ~/.ratchet: any `bin/ratchet` invocation
+# below writes logs under a throwaway home (cleaned at the end — a trap won't do,
+# the per-suite `trap ... EXIT` calls below overwrite each other). Without this
+# every fake-repo run leaked a logs/tmp-* dir into the user's real ~/.ratchet.
+export RATCHET_HOME="$(mktemp -d)"
+
 PASS=0; FAIL=0
 ok()   { printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
 fail() { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
@@ -831,6 +837,8 @@ else
   fail "FANOUT=scout + normal: --no-extensions dropped incorrectly (see $tmpf3/run.log)"
 fi
 rm -rf "$tmpf3"
+
+rm -rf "$RATCHET_HOME"   # isolated test home (see top of file)
 
 echo ""
 echo "selftest: $PASS passed, $FAIL failed"
