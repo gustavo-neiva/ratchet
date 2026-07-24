@@ -6,3 +6,4 @@
 > this file — it is advisory memory, not state.
 
 - _(example)_ `npm test` must run from the repo root; a nested cwd makes it red.
+- T0.1: Baseline confirmed — `bash test/selftest.sh` passes 19/19 (13 turn classification, 1 sanitizer, 1 agnosticism, 4 end-to-end).

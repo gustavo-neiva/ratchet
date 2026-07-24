@@ -39,8 +39,8 @@ but bump thinking one notch above `THINKING_BUILD` (max `high`) unless
 
 ## Milestone 0 — safety net first (serial)
 
-- [ ] T0.1 (trivial, serial) Baseline check: run `bash test/selftest.sh` and confirm 19/19 pass. Fix nothing else. Record the count in LEARNINGS.md.
-- [ ] T0.2 (normal, serial) Parity audit: read `/Users/gustavo-neiva/Code/archive/pi-autoloop/autonomous_loop.sh` (the battle-tested predecessor) and compare its behaviors against ratchet's lib/*.sh. Write `docs/parity-audit.md` listing every old-loop behavior and its ratchet equivalent (or "MISSING"). Do NOT change any code. If anything is genuinely missing, append a new `[ ]` task for it under Milestone 3 in this file.
+- [x] T0.1 (trivial, serial) Baseline check: run `bash test/selftest.sh` and confirm 19/19 pass. Fix nothing else. Record the count in LEARNINGS.md.
+- [IN PROGRESS] T0.2 (normal, serial) Parity audit: read `/Users/gustavo-neiva/Code/archive/pi-autoloop/autonomous_loop.sh` (the battle-tested predecessor) and compare its behaviors against ratchet's lib/*.sh. Write `docs/parity-audit.md` listing every old-loop behavior and its ratchet equivalent (or "MISSING"). Do NOT change any code. If anything is genuinely missing, append a new `[ ]` task for it under Milestone 3 in this file.
 
 ## Milestone 1 — tiered routing engine (serial: all tasks touch shared files)
 
