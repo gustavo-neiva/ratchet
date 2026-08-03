@@ -50,12 +50,14 @@ session_dir_for() {
 # watch_session -> pretty-print the live session JSONL (run via `ratchet watch`).
 # Falls back to raw tail if jq is missing. Exits on Ctrl-C; the loop keeps running.
 watch_session() {
-  local sdir f
-  sdir=$(session_dir_for "$REPO_DIR")
-  f=$(ls -t "$sdir"/*"_${SESSION_ID}.jsonl" 2>/dev/null | head -n1)
-  if [ -z "$f" ]; then
-    emit "watch: no session yet for id '${SESSION_ID}' under ${sdir}"
-    emit "watch: start the loop first (it creates the session on turn 1), then re-run watch."
+  # Source is ratchet's OWN --mode json stream (last_turn.out), which the loop
+  # writes+truncates every turn. pi's -p print mode persists NO session .jsonl,
+  # so the old glob for *_<SESSION_ID>.jsonl under the pi sessions dir matched
+  # nothing — watch failed in both ephemeral (default) and resume modes.
+  local f="$TURN_OUT"
+  if [ -z "$f" ] || [ ! -f "$f" ]; then
+    emit "watch: no live agent output yet at ${f:-<unset>}"
+    emit "watch: start the loop first ('ratchet run $REPO_DIR'), then re-run watch."
     return 1
   fi
   if ! command -v jq >/dev/null 2>&1; then
@@ -66,24 +68,25 @@ watch_session() {
   emit "watching live: $f"
   emit "(Ctrl-C to stop watching; the loop keeps running)"
   emit "------------------------------------------------------------"
-  tail -n 60 -f "$f" | jq -rj --unbuffered '
-    select(.type=="message") | .message as $m | (.timestamp // "") as $ts |
-    ($ts[11:19]) as $clock |
-    if $m.role=="user" then
-      "\u001b[36m[\($clock)] > you:\u001b[0m \(($m.content[0].text // "")[0:200] | gsub("\n";" "))\n"
-    elif $m.role=="assistant" then
-      ([ $m.content[]? |
-        if .type=="thinking" then "  \u001b[90m.. \((.thinking//"")[0:200] | gsub("\n";" "))\u001b[0m"
-        elif .type=="text" then (if ((.text//"")|length)>0 then "  \u001b[97m\((.text//"")[0:240] | gsub("\n";" "))\u001b[0m" else empty end)
-        elif .type=="toolCall" then
-          "  \u001b[33m>> \(.name)\u001b[0m " +
-          ( .arguments as $a | if (.name=="bash") then (($a.command // "")[0:200] | gsub("\n";" "))
-            elif (.name|test("read|write|edit|ls|find|grep")) then (($a.path // ($a|tostring))[0:200])
-            else ($a|tostring|.[0:160]) end )
-        else empty end ] | map(select(.!=null)) | join("\n")) + "\n"
-    elif $m.role=="toolResult" then
-      "  \u001b[32m<- \u001b[0m\u001b[90m\((([ $m.content[]? | select(.type=="text") | .text ] | join(" ") // "")[0:160] | gsub("\n";" "))\u001b[0m\n"
-    else empty end'
+  # pi --mode json schema v3: message_start carries the user prompt; assistant
+  # deltas arrive as message_update.assistantMessageEvent (text_delta streams
+  # the reply live; toolcall_delta marks a tool call, deduped per contentIndex).
+  tail -n 80 -f "$f" | jq -nrj --unbuffered '
+    foreach inputs as $e (
+      {seen:{}};
+      if $e.type=="message_start" and ($e.message.role=="user") then
+        .emit = "\n\u001b[36m> you:\u001b[0m " + (([$e.message.content[]?|select(.type=="text")|.text]|join(" "))[0:160] | gsub("\n";" ")) + "\n"
+      elif $e.type=="message_update" then
+        ($e.assistantMessageEvent // {}) as $a |
+        if $a.type=="text_delta" and (($a.delta//"")|length)>0 then .emit = $a.delta
+        elif $a.type=="toolcall_delta" then
+          ($a.contentIndex|tostring) as $k |
+          ($a.partial.content[$a.contentIndex] // {}) as $tc |
+          (if (.seen[$k]|not) and ($tc.name//null) then .seen[$k]=true | .emit = "\n\u001b[33m>> \($tc.name)\u001b[0m\n" else .emit = "" end)
+        else .emit = "" end
+      elif $e.type=="tool_execution_end" then .emit = "\n\u001b[32m<- result\u001b[0m\n"
+      else .emit = "" end;
+      .emit)'
 }
 
 # avg_turn_secs LOGFILE -> mean turn duration in seconds from took= lines
