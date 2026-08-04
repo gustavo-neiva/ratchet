@@ -199,6 +199,24 @@ check_class "auth-401"            "hard"      'request failed: HTTP 401 {"error"
 check_class "invalid-sig-thinking" "hard"     'HTTP 400 {"error":{"type":"invalid_request_error","message":"Invalid signature in thinking block"}}'
 check_class "network-blip"        "transient" 'fetch failed: ECONNRESET'
 check_class "plain-text-no-token" "transient" "I am still thinking about the problem."
+
+# json-mode: assistant PROSE mentioning quota/rate-limit/daily-limit must NOT be
+# read as a provider error (the 24%-quota false-EXHAUSTED bug). Same words inside
+# an error event still classify. STEP_TOKEN present -> classifies step, proving
+# the prose didn't short-circuit to exhausted/hard.
+check_class_json() {  # NAME EXPECTED STRING
+  local name="$1" exp="$2" str="$3" got f
+  f="$(mktemp)"; printf '%s' "$str" > "$f"
+  got="$(classify_turn "$f" "$STEP_TOKEN" "$DONE_TOKEN" 0 1)"
+  rm -f "$f"
+  [ "$got" = "$exp" ] && ok "$name -> $got" || fail "$name -> got=$got want=$exp"
+}
+check_class_json "json-prose-quota-not-exhausted" "step" \
+  '{"type":"text_delta","delta":"Next I will add dependency-scanning; note the daily quota / rate limit handling."}
+{"type":"text_end","text":"done with '"$STEP_TOKEN"'"}'
+check_class_json "json-real-429-still-exhausted" "exhausted" \
+  '{"type":"text_delta","delta":"working on it"}
+{"type":"error","error":{"type":"rate_limit_error"}} request failed: HTTP 429'
 # deadline kill with no token/error -> timeout (distinct from transient)
 check_deadline() {
   local f; f="$(mktemp)"; printf '%s' 'agent still working, no token' > "$f"
