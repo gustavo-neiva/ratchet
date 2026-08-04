@@ -26,6 +26,30 @@ The tag on each task routes it to a model tier. This is not decoration — it is
 
 Tag EVERY task. Untagged defaults to `normal` — but decide on purpose. When in doubt between two tiers, pick the cheaper one and add one line justifying it; the green gate is the real safety net, not the model.
 
+## Task ID formats (CRITICAL — parser must recognize these)
+
+Every task needs an ID the parser can extract. Supported formats:
+
+- **`T1.2`** — classic milestone.task (most common, use this by default)
+- **`A1`, `I3`** — letter(s) + number (e.g., Action items, Issues)
+- **`N-postmortem`** — letter + dash + slug (e.g., named tasks)
+- **Plain `- [ ] task`** — valid but gets `?` ID (avoid for real work)
+
+**CRITICAL:** Do NOT wrap IDs in bold/italics markdown:
+
+```markdown
+# WRONG — parser sees ** not the ID
+- [ ] **T1.4** (hard) implement feature
+- [ ] **O-secrets** task
+
+# CORRECT — parser extracts T1.4, O-secrets
+- [ ] T1.4 (hard) implement feature
+- [ ] O-secrets task
+```
+
+Bold can go in the description, never around the ID. An unrecognized ID causes
+`task=? (normal)` on every turn and doctor warns "task id unresolved".
+
 ## The task schema
 
 Every task is one tracker line plus indented fields. The tracker line is what ratchet parses (`[ ]` → `[IN PROGRESS]` → `[x]`, id, tags). The fields are what the agent reads to do the work in ONE turn.
@@ -104,6 +128,7 @@ Work these phases in order. Interview first — your best plans come from a rich
 ## Checklist before you hand off
 
 - [ ] Milestone 0 exists and its verify gate is green-able first.
+- [ ] Every task has a recognized ID format (T1.2 / A1 / N-slug) with NO bold/italic markdown around it.
 - [ ] Every task has a tag; non-obvious tags are justified in one line.
 - [ ] Every task is self-contained — a memoryless turn could do it from the task text alone.
 - [ ] Every task names exact paths (`touches`) and the `verify` command + new case.

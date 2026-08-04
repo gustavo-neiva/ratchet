@@ -4,6 +4,9 @@
 > optional id and optional tags `(trivial|normal|hard)` and/or `serial`.
 > The loop takes the `[IN PROGRESS]` task, else the first `[ ]`.
 >
+> Task IDs: `T1.2` (classic), `A1`/`I3` (letter+number), or `N-slug` (letter-dash-slug).
+> NO bold/italic markdown around IDs or parser fails with "task id unresolved".
+>
 > Tags route each task to a model tier: `(trivial)`→LIGHT (cheap, no reasoning),
 > `(normal)`→BUILD, `(hard)`→BUILD with reasoning bumped. Tag EVERY task.
 > Every task is done by ONE ephemeral turn with NO memory of prior turns — so
@@ -21,10 +24,11 @@
 > (no green, no commit) is bootstrapped right here.
 
 - [ ] T0.1 (trivial, serial) scaffold the project and wire the verify command
-      touches: _(paths)_
+      touches: _(exact paths)_
       do: _(what to scaffold; which command becomes VERIFY_CMD and why)_
       accept: Given a fresh checkout / When VERIFY_CMD runs / Then it exits green
       verify: _(exact command)_
+      constraints: _(optional: non-negotiables for this task)_
 - [ ] T0.2 (normal, serial) first end-to-end test is green (`VERIFY_CMD` passes)
 - [ ] T0.3 (normal) thinnest end-to-end slice of real value
 
