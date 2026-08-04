@@ -281,6 +281,34 @@ ratchet selftest
 
 [^deps]: **Zero dependencies** for the loop core (pure bash). `ratchet stats` needs python3; `ratchet watch` prefers `jq` (degrades gracefully without it).
 
+### Agent environment (PATH & version managers)
+
+ratchet spawns the agent **non-interactively** — it does *not* source your
+`.zshrc` / `.bashrc`. Anything your interactive shell puts on `PATH` is
+invisible to agent turns: version managers whose shims live off the default
+`PATH` (asdf, mise, pyenv, nvm, …) won't be found, and multi-language verify
+gates fail with `go: command not found` / `python: command not found` / `mix:
+command not found` — even though the toolchain is installed. (Interactive runs
+from your own terminal are unaffected; this only bites detached/loop contexts.)
+
+Fix: put the export in **`~/.ratchet/conf`**. Unlike the repo's `.ratchet.conf`
+(which is *parsed* and allowlist-checked, so rejects unknown keys), the global
+conf is **sourced** at startup (`bin/ratchet`), so `export`s flow into every
+spawned turn. asdf example:
+
+```sh
+# ~/.ratchet/conf  (sourced; trusted; applies to every repo)
+export ASDF_DATA_DIR="$HOME/.asdf"
+export PATH="$ASDF_DATA_DIR/shims:$PATH"   # shims must precede Homebrew
+```
+
+Sanity check — each should resolve under your version manager, not
+`/opt/homebrew/bin`:
+
+```sh
+for t in python go rustc cargo elixir mix ruby bundle node; do command -v "$t"; done
+```
+
 ## Commands
 
 ```
@@ -314,6 +342,9 @@ models          List/add/remove/validate model chains (--tier, --pos, --repo)
 ```
 --commit / --no-commit    Commit each green turn (default: on)
 --verify-cmd CMD          Green gate before every commit (RED blocks)
+                          Multi-toolchain tip: verify only changed entries
+                          (e.g. 'bash changed-entries.sh') so pre-existing
+                          environmental reds don't block good turns
 --no-verify-gate          Skip pre-commit re-verify (trust agent's word)
 --push                    Push ONCE after ALL_DONE (default: off; human owns push)
 --pr                      Push + open PR/MR (gh/glab) after ALL_DONE; human merges

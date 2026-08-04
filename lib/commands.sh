@@ -461,6 +461,11 @@ cmd_doctor() {
   if [ -f "$agents" ]; then
     if grep -q "ratchet-protocol:v$RATCHET_PROTOCOL_VERSION:begin" "$agents"; then
       pr_ok "AGENTS.md protocol markers current (v$RATCHET_PROTOCOL_VERSION)"
+      # verify tracker filename matches
+      local _tr="${TRACKER_FILE:-$(detect_tracker_file "$dir")}"
+      if [ -n "$_tr" ] && ! grep -q "$_tr" "$agents"; then
+        pr_fail "AGENTS.md references a different tracker than TRACKER_FILE=$_tr (re-stamp: ratchet init $dir)"
+      fi
     elif grep -q 'ratchet-protocol:.*:begin' "$agents"; then
       pr_fail "AGENTS.md protocol is STALE (re-stamp: ratchet init $dir)"
     else
@@ -476,6 +481,9 @@ cmd_doctor() {
     TRACKER_FILE="$tr"; REPO_DIR="$dir"
     if tracker_has_open; then
       pr_ok "tracker '$tr' has an open task"
+      # verify task id resolves
+      local _tid; _tid=$(tracker_next_id_and_text | awk '{print $1}')
+      [ "$_tid" = "?" ] && pr_fail "task id unresolved on first open task; parser degraded to '?' (see tracker grammar)"
     elif [ "$(tracker_count_done)" -gt 0 ]; then
       pr_ok "tracker '$tr' fully done (all [x]) — loop final-commits + stops"
     else
@@ -486,7 +494,16 @@ cmd_doctor() {
   fi
 
   # VERIFY_CMD set (no-gate is loud, never silent)
-  if [ -n "$VERIFY_CMD" ]; then pr_ok "VERIFY_CMD is set: '$VERIFY_CMD'"
+  if [ -n "$VERIFY_CMD" ]; then
+    pr_ok "VERIFY_CMD is set: '$VERIFY_CMD'"
+    # dry-run: resolve first token
+    local _cmd; _cmd=$(printf '%s' "$VERIFY_CMD" | awk '{print $1}')
+    case "$_cmd" in
+      if|then|else|elif|fi|for|while|do|done|case|esac|function|return|continue|break|:) ;; # shell builtins
+      *) if ! command -v "$_cmd" >/dev/null 2>&1 && [ ! -r "$dir/$_cmd" ]; then
+           pr_fail "VERIFY_CMD references unresolved executable: '$_cmd' (not found via command -v or as file)"
+         fi ;;
+    esac
   else pr_fail "VERIFY_CMD is EMPTY — set it in .ratchet.conf (no-gate is loud by design)"; fi
 
   # tokens consistent between conf and stamped block
@@ -499,6 +516,17 @@ cmd_doctor() {
   # secret-scan tool availability
   if command -v gitleaks >/dev/null 2>&1; then pr_ok "gitleaks available (rich secret scan)"
   else pr_ok "gitleaks missing — builtin pattern scan will run (install gitleaks for more)"; fi
+
+  # required tools check
+  if [ -n "$REQUIRED_TOOLS" ]; then
+    local _missing="" _t
+    for _t in $(printf '%s' "$REQUIRED_TOOLS" | tr ',' ' '); do
+      [ -n "$_t" ] || continue
+      command -v "$_t" >/dev/null 2>&1 || _missing="$_missing $_t"
+    done
+    if [ -z "$_missing" ]; then pr_ok "all required tools available: $REQUIRED_TOOLS"
+    else pr_fail "missing required tool(s):$_missing (install them or remove from REQUIRED_TOOLS in .ratchet.conf)"; fi
+  fi
 
   # configured models exist in pi's registry (typo/churn guard). Uses the
   # 24h cache ONLY — doctor runs before every loop and `pi --list-models`

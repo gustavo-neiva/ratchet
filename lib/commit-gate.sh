@@ -115,6 +115,16 @@ commit_turn() {
       emit "  commit gate: running '$VERIFY_CMD' …"
       if ! ( cd "$REPO_DIR" && eval "$VERIFY_CMD" ) >>"$LOOP_LOG" 2>&1; then
         emit "  commit gate RED — NOT committing; leaving work for next turn to repair."
+        # append last error line to LEARNINGS.md
+        local _lrn="$REPO_DIR/LEARNINGS.md" _err _ts
+        _err=$(tail -n 20 "$LOOP_LOG" | grep -v '^[[:space:]]*$' | tail -n1)
+        [ -n "$_err" ] && _ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" && {
+          grep -qxF "$_err" "$_lrn" 2>/dev/null || {
+            echo "## auto-captured" >>"$_lrn" 2>/dev/null || true
+            echo "$_err  # $_ts" >>"$_lrn" || true
+            tail -n 50 "$_lrn" >"$_lrn.tmp" 2>/dev/null && mv "$_lrn.tmp" "$_lrn" 2>/dev/null || true
+          }
+        }
         return 1
       fi
     else

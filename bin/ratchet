@@ -253,7 +253,7 @@ main() {
     emit "WARNING: staged changes detected at startup (previous killed run?) — they will ride the next green-gated commit."
   fi
 
-  local turn=0 current_tier="" current_tier_chain="" done_gate_fails=0 last_model="none"
+  local turn=0 current_tier="" current_tier_chain="" done_gate_fails=0 last_model="none" all_benched_count=0
   while true; do
     turn=$((turn+1))
 
@@ -301,8 +301,15 @@ main() {
       fi
       # If still -1, ALL models are benched.
       if [ "$idx" = "-1" ]; then
-        emit "ALL models benched (exhausted). Sleeping ${BOTH_WAIT}s, then reset + retry."
-        sleep "$BOTH_WAIT"
+        all_benched_count=$((all_benched_count + 1))
+        local backoff_secs
+        case "$all_benched_count" in
+          1) backoff_secs=900 ;;
+          2) backoff_secs=3600 ;;
+          *) backoff_secs=14400 ;;
+        esac
+        emit "ALL models benched (exhausted), attempt $all_benched_count. Sleeping ${backoff_secs}s, then reset + retry."
+        sleep "$backoff_secs"
         reset_all
         current_tier=""
         current_tier_chain=""
@@ -346,6 +353,9 @@ main() {
       [ -n "$next_task" ] && PROMPT="$PROMPT
 The current tracker task is: $next_task
 (Verify it is still the first open/IN PROGRESS task in $TRACKER_FILE before starting.)"
+      # inject last-turn note if available
+      [ -f "$LOG_DIR/last_turn.note" ] && PROMPT="$PROMPT
+$(cat "$LOG_DIR/last_turn.note")"
     fi
 
     emit "--- turn $turn | model=$model ---"
@@ -364,7 +374,12 @@ The current tracker task is: $next_task
 
     case "$TURN_STATUS" in
       done)
-        if ! commit_turn "$turn" "$model"; then
+        # sanity-gate: verify no open tasks remain
+        if tracker_has_open || tracker_has_inprogress; then
+          emit "agent printed $DONE_TOKEN but open tasks remain — treating as step and continuing."
+          TURN_STATUS="step"
+        fi
+        if [ "$TURN_STATUS" = "done" ] && ! commit_turn "$turn" "$model"; then
           done_gate_fails=$((done_gate_fails+1))
           emit "DONE turn was RED at commit gate — treating as repair-needed, not complete (${done_gate_fails}/${MAX_DONE_GATE_FAILS})."
           [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
@@ -384,6 +399,7 @@ The current tracker task is: $next_task
         break ;;
       step)
         transient_arr[$idx]=0
+        all_benched_count=0
         if ! commit_turn "$turn" "$model"; then
           emit "step turn RED at commit gate — next turn will repair. Sleeping ${SHORT_SLEEP}s."
           [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
@@ -393,7 +409,11 @@ The current tracker task is: $next_task
         [ "$ONCE" = 1 ] && { emit "--once: stopping after one step."; break; }
         sleep "$SHORT_SLEEP" ;;
       exhausted)
-        emit "model $model EXHAUSTED (quota/rate-limit). Benching ${COOLDOWN}s; switching."
+        if [ "$turn_elapsed" -lt 15 ]; then
+          emit "model $model EXHAUSTED (quota/rate-limit) in ${turn_elapsed}s — instant-quota, model was already dry. Benching ${COOLDOWN}s; switching."
+        else
+          emit "model $model EXHAUSTED (quota/rate-limit). Benching ${COOLDOWN}s; switching."
+        fi
         bench_model "$idx"
         [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
         sleep "$SHORT_SLEEP" ;;
@@ -418,6 +438,14 @@ The current tracker task is: $next_task
         [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
         sleep "$backoff" ;;
     esac
+    
+    # write last-turn note for next turn's prompt
+    if [ "$COMMITTED_THIS_TURN" = 1 ]; then
+      git diff HEAD~1 --name-only 2>/dev/null | head -n5 | tr '\n' ',' | sed 's/,$//' >"$LOG_DIR/last_turn.note" 2>/dev/null || true
+      sed -i '' "1s/^/Last turn changed: /" "$LOG_DIR/last_turn.note" 2>/dev/null || sed -i "1s/^/Last turn changed: /" "$LOG_DIR/last_turn.note" 2>/dev/null || true
+    else
+      echo "Last turn: gate RED, left staged." >"$LOG_DIR/last_turn.note" 2>/dev/null || true
+    fi
   done
 
   emit "ratchet END after $turn turn(s)."

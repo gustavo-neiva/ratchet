@@ -116,7 +116,7 @@ die()  { emit "FATAL: $*"; exit 1; }
 
 # Build the default per-turn prompt from the finalized tokens (called late).
 build_default_prompt() {
-  printf 'Do ONE discrete step of work on this repository'"'"'s current task, following the project'"'"'s AGENTS.md instructions. Write all changes to files; do not dump file contents in your reply. When the step is complete, print the token %s on its own line. If there is absolutely no remaining work, print the token %s on its own line instead.' "$STEP_TOKEN" "$DONE_TOKEN"
+  printf 'Do ONE discrete step of work on this repository'"'"'s current task, following the project'"'"'s AGENTS.md instructions. Write all changes to files; do not dump file contents in your reply. Do NOT edit .ratchet.conf or the AGENTS.md protocol markers — the loop reverts and wastes the turn. When the step is complete, print the token %s on its own line. If there is absolutely no remaining work, print the token %s on its own line instead.' "$STEP_TOKEN" "$DONE_TOKEN"
 }
 
 # Build the plan-drafting prompt for ONE `ratchet plan` turn (called late, after

@@ -15,12 +15,21 @@
 
 # tracker_next OPEN_MARKER -> echoes the first task line matching the status, or "".
 # Reads $TRACKER_FILE under $REPO_DIR. OPEN_MARKER: "open" => [ ] , "inprogress" => [IN PROGRESS]
+# Skips [ ] lines under DONE/Done when/Definition of Done/checklist headings.
 tracker_next() {
   local marker="$1" file="$REPO_DIR/$TRACKER_FILE"
   [ -f "$file" ] || return 0
   case "$marker" in
-    inprogress) grep -nE '^[[:space:]]*-?[[:space:]]*\[IN PROGRESS\]' "$file" | head -n1 ;;
-    open)       grep -nE '^[[:space:]]*-?[[:space:]]*\[ \]'          "$file" | head -n1 ;;
+    inprogress)
+      awk '/^#+ / { heading = tolower($0) }
+           /^[[:space:]]*-?[[:space:]]*\[IN PROGRESS\]/ {
+             if (heading !~ /done|checklist/) { print NR ":" $0; exit }
+           }' "$file" ;;
+    open)
+      awk '/^#+ / { heading = tolower($0) }
+           /^[[:space:]]*-?[[:space:]]*\[ \]/ {
+             if (heading !~ /done|checklist/) { print NR ":" $0; exit }
+           }' "$file" ;;
   esac
 }
 
@@ -120,13 +129,12 @@ tracker_next_id_and_text() {
   tag=$(echo "$line" | sed -nE 's/^[^(]*\((trivial|normal|hard)[,)].*$/\1/p')
   [ -z "$tag" ] && tag="normal"
   
-  # Try to extract id: must be a T-prefixed token OR be followed by parentheses
-  # Examples: "T1.2 (hard) text" -> id=T1.2
-  #           "do the thing" -> id=?
-  #           "T5.1 text" -> id=T5.1 (even without parens, T-prefix signals an id)
-  if echo "$line" | grep -qE '^T[0-9]+\.[0-9]+[[:space:]]'; then
-    # T-prefixed id exists
-    id=$(echo "$line" | sed -E 's/^(T[0-9]+\.[0-9]+).*/\1/')
+  # Extract id: [A-Za-z]+[0-9]+(.N)? or [A-Za-z]+-slug
+  # Examples: T1.2, A1, I3, N-postmortem
+  if echo "$line" | grep -qE '^[A-Za-z]+[0-9]+(\.[0-9]+)?[[:space:]]'; then
+    id=$(echo "$line" | sed -E 's/^([A-Za-z]+[0-9]+(\.[0-9]+)?).*/\1/')
+  elif echo "$line" | grep -qE '^[A-Za-z]+-[a-z0-9-]+[[:space:]]'; then
+    id=$(echo "$line" | sed -E 's/^([A-Za-z]+-[a-z0-9-]+).*/\1/')
   else
     id="?"
   fi
