@@ -5,9 +5,16 @@
 #     - [ ] T1.2 (normal, serial) design the schema ...
 #        │   │       │     │
 #        │   │       │     └─ optional tags: trivial|normal|hard  and/or  serial
-#        │   │       └─ optional task id (T<milestone>.<n> or any token)
+#        │   │       └─ optional task id (see supported formats below)
 #        │   └─ status marker: [ ] open · [IN PROGRESS] · [x] done
 #        └─ leading "- " (with optional indentation)
+#
+#  Supported task ID formats:
+#    T1.2, T5     — classic milestone.task or T+number (most common)
+#    A1, I3       — letter(s) + number (e.g., Action items, Issues)
+#    N-postmortem — letter + dash + slug (e.g., Named tasks)
+#    ? (no ID)    — plain checkboxes valid but get '?' ID (avoid for main work)
+#
 #  Plain untagged checkboxes (`- [ ] do the thing`) remain 100% valid, so old
 #  trackers keep working. Tags feed model routing and future parallel-safety;
 #  ids feed per-task failure strikes and commit subjects.
