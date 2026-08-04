@@ -28,7 +28,9 @@ show_excerpt() {
   emit "--- summary ---"
   if head -c 32 "$TURN_OUT" 2>/dev/null | grep -q '^{"type":"session"'; then
     local joined
-    joined=$(grep '"type":"text_delta"' "$TURN_OUT" 2>/dev/null \
+    # Prefer assistant text; fall back to thinking for reasoning-only models
+    # (e.g. kimi-for-coding streams its whole reply as reasoning_content).
+    joined=$(grep -E '"type":"(text|thinking)_delta"' "$TURN_OUT" 2>/dev/null \
       | sed -e 's/.*"delta":"//' -e 's/","partial.*//' \
       | awk '{printf "%s", $0}' \
       | sed -e 's/\\"/"/g')
@@ -74,11 +76,17 @@ watch_session() {
   tail -n 80 -f "$f" | jq -nrj --unbuffered '
     foreach inputs as $e (
       {seen:{}};
-      if $e.type=="message_start" and ($e.message.role=="user") then
-        .emit = "\n\u001b[36m> you:\u001b[0m " + (([$e.message.content[]?|select(.type=="text")|.text]|join(" "))[0:160] | gsub("\n";" ")) + "\n"
+      if $e.type=="message_start" then
+        # Each message reuses contentIndex from 1, so reset the per-message
+        # toolcall dedup map or later tool names never print (orphan results).
+        .seen = {} |
+        if $e.message.role=="user" then
+          .emit = "\n\u001b[36m> you:\u001b[0m " + (([$e.message.content[]?|select(.type=="text")|.text]|join(" "))[0:160] | gsub("\n";" ")) + "\n"
+        else .emit = "" end
       elif $e.type=="message_update" then
         ($e.assistantMessageEvent // {}) as $a |
         if $a.type=="text_delta" and (($a.delta//"")|length)>0 then .emit = $a.delta
+        elif $a.type=="thinking_delta" and (($a.delta//"")|length)>0 then .emit = "\u001b[90m" + $a.delta + "\u001b[0m"
         elif $a.type=="toolcall_delta" then
           ($a.contentIndex|tostring) as $k |
           ($a.partial.content[$a.contentIndex] // {}) as $tc |
