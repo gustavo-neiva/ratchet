@@ -1630,6 +1630,75 @@ fi
 
 rm -rf "$tmp23"
 
+# =============================================================================
+# Suite 24: build_default_prompt with template rendering (T1.1)
+# =============================================================================
+echo "Suite 24: build_default_prompt renders loop protocol from template"
+
+# Setup: finalize tokens and tracker vars so build_default_prompt can run
+TRACKER_FILE="PLAN.md"
+VERIFY_CMD="bash test/selftest.sh"
+STEP_TOKEN="STEP_COMPLETE"
+DONE_TOKEN="ALL_DONE"
+
+# Test 1: With template present, prompt contains rendered protocol substrings
+prompt="$(build_default_prompt)"
+
+if echo "$prompt" | grep -q "exactly ONE discrete step"; then
+  ok "build_default_prompt: contains 'exactly ONE discrete step' from template"
+else
+  fail "build_default_prompt: missing 'exactly ONE discrete step'"
+fi
+
+if echo "$prompt" | grep -q "STEP_COMPLETE"; then
+  ok "build_default_prompt: contains STEP_COMPLETE token"
+else
+  fail "build_default_prompt: missing STEP_COMPLETE token"
+fi
+
+if echo "$prompt" | grep -q "ALL_DONE"; then
+  ok "build_default_prompt: contains ALL_DONE token"
+else
+  fail "build_default_prompt: missing ALL_DONE token"
+fi
+
+if echo "$prompt" | grep -q "Read AGENTS.md and LEARNINGS.md for project-specific facts"; then
+  ok "build_default_prompt: contains AGENTS.md trailer"
+else
+  fail "build_default_prompt: missing AGENTS.md trailer"
+fi
+
+if echo "$prompt" | grep -q "Do NOT edit .ratchet.conf"; then
+  ok "build_default_prompt: contains .ratchet.conf forbidden line"
+else
+  fail "build_default_prompt: missing .ratchet.conf forbidden line"
+fi
+
+# Test 2: Fallback when template unreadable - prompt still non-empty with tokens
+# Save real RATCHET_ROOT, point to bogus path, restore after
+real_root="$RATCHET_ROOT"
+export RATCHET_ROOT="/nonexistent/bogus/path"
+fallback_prompt="$(build_default_prompt 2>/dev/null || echo "")"
+export RATCHET_ROOT="$real_root"
+
+if [ -n "$fallback_prompt" ]; then
+  ok "build_default_prompt fallback: produces non-empty prompt"
+else
+  fail "build_default_prompt fallback: prompt is empty"
+fi
+
+if echo "$fallback_prompt" | grep -q "STEP_COMPLETE"; then
+  ok "build_default_prompt fallback: contains STEP_COMPLETE token"
+else
+  fail "build_default_prompt fallback: missing STEP_COMPLETE token"
+fi
+
+if echo "$fallback_prompt" | grep -q "ALL_DONE"; then
+  ok "build_default_prompt fallback: contains ALL_DONE token"
+else
+  fail "build_default_prompt fallback: missing ALL_DONE token"
+fi
+
 echo ""
 echo "selftest: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
