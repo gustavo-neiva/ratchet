@@ -8,7 +8,8 @@
 > NO bold/italic markdown around IDs or parser fails with "task id unresolved".
 >
 > Tags route each task to a model tier: `(trivial)`→LIGHT (cheap, no reasoning),
-> `(normal)`→BUILD, `(hard)`→BUILD with reasoning bumped. Tag EVERY task.
+> `(normal)`→BUILD, `(hard)`→BUILD with reasoning bumped. The planner assigns
+> tier tags at authoring time with a one-line justification for non-obvious choices.
 > Every task is done by ONE ephemeral turn with NO memory of prior turns — so
 > each task must be self-contained: name the files, the "why", and how to verify.
 > Author with the `ratchet-plan` skill. See the ratchet repo's own PLAN.md for a

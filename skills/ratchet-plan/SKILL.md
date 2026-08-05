@@ -24,7 +24,7 @@ The tag on each task routes it to a model tier. This is not decoration — it is
 | `(hard)`   | BUILD + thinking bump | mid with reasoning raised one notch | tricky logic, blast-radius-wide changes, anything needing scouts/review |
 | `(serial)` | — | (any tier) | add when the task must NOT run in parallel with siblings (shared files) |
 
-Tag EVERY task. Untagged defaults to `normal` — but decide on purpose. When in doubt between two tiers, pick the cheaper one and add one line justifying it; the green gate is the real safety net, not the model.
+**The planner auto-tags every task at authoring time.** As you draft each task, assign the tier tag `(trivial|normal|hard)` with a one-line justification for any non-obvious choice. The human reviews at the mandatory checkpoint before any run, but tagging happens during drafting, not as a separate pass. Untagged defaults to `normal` — but decide on purpose. When in doubt between two tiers, pick the cheaper one; the green gate is the real safety net, not the model.
 
 ## Task ID formats (CRITICAL — parser must recognize these)
 
@@ -121,15 +121,14 @@ Work these phases in order. Interview first — your best plans come from a rich
 2. **Design constraints.** Write the non-negotiable invariants every turn must hold (regressions, additive-only, runtime limits, forbidden files). These are the "read before ANY task" block.
 3. **Milestone 0.** Define the walking skeleton whose VERIFY_CMD is green. Nothing else runs before it.
 4. **Decompose.** Break the work into milestones, then tasks. Each task = one discrete step a single turn can finish. If a task can't fit one turn, split it.
-5. **Fill the schema.** For each task write touches / do / snippet / accept / verify / constraints. Name real paths and functions — open the files if you must.
-6. **Tier pass.** Tag every task. For any non-obvious tag, add one line of justification. Mark `(serial)` on every task that shares a `touches` path with a sibling.
-7. **Hand off.** Write `PLAN.md`. Then the human reviews it (mandatory checkpoint) before `ratchet run`. If drafting inside the loop, `ratchet plan` stops loudly for this review — never auto-run.
+5. **Fill the schema.** For each task write touches / do / snippet / accept / verify / constraints. Name real paths and functions — open the files if you must. **As you write each task, assign its tier tag `(trivial|normal|hard)` with a one-line justification for any non-obvious choice.** Mark `(serial)` on every task that shares a `touches` path with a sibling.
+6. **Hand off.** Write `PLAN.md`. Then the human reviews it (mandatory checkpoint) before `ratchet run`. If drafting inside the loop, `ratchet plan` stops loudly for this review — never auto-run.
 
 ## Checklist before you hand off
 
 - [ ] Milestone 0 exists and its verify gate is green-able first.
 - [ ] Every task has a recognized ID format (T1.2 / A1 / N-slug) with NO bold/italic markdown around it.
-- [ ] Every task has a tag; non-obvious tags are justified in one line.
+- [ ] Every task has a tier tag `(trivial|normal|hard)` assigned at authoring time; non-obvious tags are justified in one line.
 - [ ] Every task is self-contained — a memoryless turn could do it from the task text alone.
 - [ ] Every task names exact paths (`touches`) and the `verify` command + new case.
 - [ ] Tasks sharing a `touches` path are all `(serial)`.

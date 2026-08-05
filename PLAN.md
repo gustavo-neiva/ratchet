@@ -585,7 +585,7 @@ next round.
       constraints: display-only; best-effort cost (missing join = no price shown);
           reuse suggest_chain from T7.2; no change to add/remove/thinking subcommands.
 
-- [IN PROGRESS] T7.5 (normal, serial) PLAN-tier model auto-tags each task's tier as it drafts.
+- [x] T7.5 (normal, serial) PLAN-tier model auto-tags each task's tier as it drafts.
       touches: skills/ratchet-plan/SKILL.md, templates/PLAN.seed.md (if it carries
           the tag guidance), lib/commands.sh (build_plan_prompt only if it inlines
           tag instructions)
@@ -610,7 +610,7 @@ next round.
       constraints: no parser/grammar change; the human review checkpoint is
           preserved (never auto-run); prose/prompt change only.
 
-- [ ] T7.6 (trivial) Document automatic model selection.
+- [IN PROGRESS] T7.6 (trivial) Document automatic model selection.
       touches: README.md
       do: In the model-routing section, add a subsection: "Automatic selection
           (minimal config)". Explain: availability comes from `pi --list-models`;
