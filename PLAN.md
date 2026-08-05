@@ -348,7 +348,7 @@ next round.
         being human-owned. The shared builder is the whole point — init and the
         gate must not drift.
 
-- [IN PROGRESS] T6.2 (normal, serial) Bound watchdog reaping so a turn can't run far past TURN_TIMEOUT.
+- [x] T6.2 (normal, serial) Bound watchdog reaping so a turn can't run far past TURN_TIMEOUT.
       touches: lib/run-turn.sh (`run_turn` kill/reap tail, after the watchdog loop)
       problem: three turns hit `class=timeout` at took=1816/1970/2365s against a
       1800s cap (cookbook turn 38; harbor). `took=` is measured at

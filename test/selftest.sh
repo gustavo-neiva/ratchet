@@ -1287,6 +1287,48 @@ extracted_block="$(sed -n '/ratchet-protocol:v[0-9]*:begin/,/ratchet-protocol:v[
 
 rm -rf "$tmpt"
 
+# --- suite 20: bounded reap (T6.2) ---
+echo ""
+echo "== suite 20: bounded reap (watchdog kill path) =="
+
+# Source run-turn.sh to get bounded_reap function
+. "$RR/lib/run-turn.sh"
+
+# Test 1: bounded_reap returns within ~12s for a wedged (SIGKILL'd) long-lived process
+tmpb="$(mktemp -d)"
+sleep 600 &  # deliberately long-lived subprocess
+wedged_pid=$!
+kill -9 "$wedged_pid" 2>/dev/null  # SIGKILL it to simulate a wedged process
+
+start_reap=$SECONDS
+bounded_reap "$wedged_pid"
+elapsed_reap=$((SECONDS - start_reap))
+
+# Should return within ~12s (10s bound + margin)
+if [ "$elapsed_reap" -le 12 ]; then
+  ok "bounded_reap returns within bound (~${elapsed_reap}s <= 12s)"
+else
+  fail "bounded_reap exceeded bound (took ${elapsed_reap}s > 12s)"
+fi
+
+# Test 2: bounded_reap handles already-dead process (immediate return)
+sleep 0.1 &  # short-lived process
+quick_pid=$!
+wait "$quick_pid" 2>/dev/null  # let it finish
+
+start_dead=$SECONDS
+bounded_reap "$quick_pid"
+elapsed_dead=$((SECONDS - start_dead))
+
+# Should return immediately (within 1s)
+if [ "$elapsed_dead" -le 1 ]; then
+  ok "bounded_reap handles already-dead process quickly (~${elapsed_dead}s)"
+else
+  fail "bounded_reap slow on dead process (${elapsed_dead}s > 1s)"
+fi
+
+rm -rf "$tmpb"
+
 rm -rf "$RATCHET_HOME"   # isolated test home (see top of file)
 
 echo ""

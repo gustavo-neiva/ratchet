@@ -13,6 +13,20 @@
 
 TURN_STATUS=""
 
+# bounded_reap PID -> returns within ~10s regardless of child state
+# Polls kill -0 for up to 10s, then detaches if still alive (OS reaps orphan later)
+bounded_reap() {
+  local pid="$1" reap_attempts=0
+  while kill -0 "$pid" 2>/dev/null && [ "$reap_attempts" -lt 10 ]; do
+    sleep 1
+    reap_attempts=$((reap_attempts + 1))
+  done
+  # If reaped during polling, collect status; otherwise detach
+  if ! kill -0 "$pid" 2>/dev/null; then
+    wait "$pid" 2>/dev/null
+  fi
+}
+
 run_turn() {
   local model="$1" tag="$2"
   : > "$TURN_OUT"                       # truncate per-turn agent output
@@ -111,7 +125,7 @@ run_turn() {
     kill -9 "$pid" 2>/dev/null
     pkill -9 -P "$pid" 2>/dev/null
   fi
-  wait "$pid" 2>/dev/null              # reap; ignore exit code (we classify by content)
+  bounded_reap "$pid"  # bounded: returns within ~10s regardless of child state
 
   if [ "$STREAM_AGENT" = 1 ]; then print_new_bytes stream_off; fi
 
