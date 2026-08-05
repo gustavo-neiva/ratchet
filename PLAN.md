@@ -565,7 +565,7 @@ next round.
           behavior (guard the existing 300+ line-format + stats tests); only the
           both-empty branch is new; no new die/hang introduced.
 
-- [IN PROGRESS] T7.4 (normal, serial) `ratchet models` shows cost + derived chains.
+- [x] T7.4 (normal, serial) `ratchet models` shows cost + derived chains.
       touches: lib/models.sh (cmd_models list), test/selftest.sh
       do: In `cmd_models list`, next to each chain member's `[ok|UNKNOWN]`
           registry mark, append its models.dev cost when joined:
@@ -585,7 +585,7 @@ next round.
       constraints: display-only; best-effort cost (missing join = no price shown);
           reuse suggest_chain from T7.2; no change to add/remove/thinking subcommands.
 
-- [ ] T7.5 (normal, serial) PLAN-tier model auto-tags each task's tier as it drafts.
+- [IN PROGRESS] T7.5 (normal, serial) PLAN-tier model auto-tags each task's tier as it drafts.
       touches: skills/ratchet-plan/SKILL.md, templates/PLAN.seed.md (if it carries
           the tag guidance), lib/commands.sh (build_plan_prompt only if it inlines
           tag instructions)

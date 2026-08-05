@@ -109,16 +109,26 @@ _tier_key() {
   esac
 }
 
-# _chain_with_marks CHAIN REGISTRY -> echo chain with ✓/✗ per model.
+# _chain_with_marks CHAIN REGISTRY -> echo chain with ✓/✗ per model + cost when available.
 _chain_with_marks() {
-  local chain="$1" reg="$2" m out="" mark
+  local chain="$1" reg="$2" m out="" mark meta inp outp cost_str
   IFS=',' read -ra arr <<< "$chain"
   for m in ${arr[@]+"${arr[@]}"}; do
     [ -n "$m" ] || continue
     if [ -z "$reg" ]; then mark="?"
     elif printf '%s\n' "$reg" | grep -qxF "$m"; then mark="ok"
     else mark="UNKNOWN"; fi
-    out="${out:+$out, }$m [$mark]"
+    
+    # append cost if available from models.dev (best-effort)
+    cost_str=""
+    meta="$(model_meta "$m" 2>/dev/null || true)"
+    if [ -n "$meta" ]; then
+      inp="$(echo "$meta" | cut -f2)"
+      outp="$(echo "$meta" | cut -f3)"
+      [ -n "$inp" ] && [ -n "$outp" ] && cost_str=" \$$inp/\$$outp"
+    fi
+    
+    out="${out:+$out, }$m [$mark]$cost_str"
   done
   echo "${out:-<empty>}"
 }
@@ -155,16 +165,32 @@ cmd_models() {
     list)
       local reg=""; reg="$(pi_model_registry refresh)" || \
         emit "note: pi registry unavailable — showing chains without validation marks"
+      
+      # MODEL_RANK summary
+      if [ -n "${MODEL_RANK:-}" ]; then
+        emit "MODEL_RANK: $MODEL_RANK"
+      else
+        emit "MODEL_RANK: (unset)"
+      fi
+      emit ""
+      
       emit "effective chains (edit targets: global=$GLOBAL_CONF | --repo <dir>/.ratchet.conf):"
       emit "  MODELS : $(_chain_with_marks "$MODELS" "$reg")"
-      local t chain key
+      local t chain key derived
       for t in plan build light; do
         key=$(_tier_key models "$t")
         eval "chain=\"\${$key}\""
         if [ -n "$chain" ]; then
           emit "  $(printf '%-6s' "$(echo "$t" | tr 'a-z' 'A-Z')") : $(_chain_with_marks "$chain" "$reg") (thinking=$(thinking_for_tier "$t"))"
         else
-          emit "  $(printf '%-6s' "$(echo "$t" | tr 'a-z' 'A-Z')") : -> MODELS (flat) (thinking=$(thinking_for_tier "$t"))"
+          # show derived chain when tier key is unset
+          derived="$(suggest_chain "$t" 2>/dev/null || true)"
+          if [ -n "$derived" ]; then
+            emit "  $(printf '%-6s' "$(echo "$t" | tr 'a-z' 'A-Z')") : -> MODELS (flat) (thinking=$(thinking_for_tier "$t"))"
+            emit "           derived: $(_chain_with_marks "$derived" "$reg")"
+          else
+            emit "  $(printf '%-6s' "$(echo "$t" | tr 'a-z' 'A-Z')") : -> MODELS (flat) (thinking=$(thinking_for_tier "$t"))"
+          fi
         fi
       done
       if [ -n "$reg" ]; then

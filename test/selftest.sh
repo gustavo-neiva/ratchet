@@ -1221,6 +1221,26 @@ PATH="$tmpp:$PATH" "$RATCHET" models list >"$tmpm/list.log" 2>&1 \
   && grep -q 'LIGHT' "$tmpm/list.log" && grep -q 'zai/glm-5-turbo \[ok\]' "$tmpm/list.log" && grep -q 'zai/nope \[UNKNOWN\]' "$tmpm/list.log" \
   && ok "models list shows chains with registry marks" || fail "models list (see $tmpm/list.log)"
 
+# T7.4: cost display + MODEL_RANK + derived chains
+mkdir -p "$RATCHET_HOME"
+printf 'zai/glm-5.2\t1.4\t4.4\ttrue\ttrue\t1000000\n' > "$RATCHET_HOME/models.cost"
+printf 'zai/glm-5-turbo\t0.5\t1.5\ttrue\ttrue\t200000\n' >> "$RATCHET_HOME/models.cost"
+
+rm -f "$RATCHET_HOME/conf"
+PATH="$tmpp:$PATH" "$RATCHET" models add zai/glm-5.2 --tier light >/dev/null 2>&1
+PATH="$tmpp:$PATH" "$RATCHET" models list >"$tmpm/cost.log" 2>&1 \
+  && grep -q 'zai/glm-5.2 \[ok\] \$1.4/\$4.4' "$tmpm/cost.log" \
+  && ok "models list shows cost for joined models" || fail "models list cost (see $tmpm/cost.log)"
+
+grep -q 'MODEL_RANK: (unset)' "$tmpm/cost.log" \
+  && ok "models list shows MODEL_RANK status" || fail "models list MODEL_RANK (see $tmpm/cost.log)"
+
+# derived chain: set MODEL_RANK and check unset tier shows derived
+printf 'MODEL_RANK=zai/glm-5.2,zai/glm-5-turbo\n' > "$RATCHET_HOME/conf"
+PATH="$tmpp:$PATH" "$RATCHET" models list >"$tmpm/derived.log" 2>&1 \
+  && grep -q 'derived:' "$tmpm/derived.log" \
+  && ok "models list shows derived chain for unset tiers" || fail "models list derived (see $tmpm/derived.log)"
+
 # --repo: edit the repo contract + re-stamp conf.hash (ratchet's own edit is not tampering)
 rm -f "$RATCHET_HOME/conf"   # clean global so the repo chain starts empty
 git -C "$tmpm" init -q; mkdir -p "$tmpm/.ratchet"
