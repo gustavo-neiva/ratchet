@@ -17,6 +17,7 @@
 # =============================================================================
 set -uo pipefail
 RR="$(cd "$(dirname "$0")/.." && pwd)"     # ratchet repo root
+export RATCHET_ROOT="$RR"                  # commands.sh reads it (bin/ratchet exports it in prod)
 RATCHET="$RR/bin/ratchet"
 FAKE="$RR/test/fixtures/fake-agent"
 
@@ -618,6 +619,30 @@ check_secret() {  # NAME EXPECT_RC(0=block,1=clean) CONTENT
 check_secret "openssh-private-key blocks" 0 '-----BEGIN OPENSSH PRIVATE KEY-----'
 check_secret "bare-private-key blocks"    0 '-----BEGIN PRIVATE KEY-----'
 check_secret "clean-diff passes"          1 'just a normal line of code'
+
+# T6.4: a block (rc=0) must NEVER carry an empty reason (the empty-reason
+# `BLOCKED: secret scan —  —` shape that dead-looped repos historically), and a
+# clean pass must leave no stale reason set.
+check_secret_reason() {  # NAME EXPECT_RC CONTENT
+  local name="$1" exp="$2" content="$3" d rc
+  d="$(mktemp -d)"; git -C "$d" init -q
+  printf '%s\n' "$content" > "$d/f.txt"; git -C "$d" add f.txt
+  # Run in THIS shell (cd + restore) so SECRET_BLOCK_REASON is observable — a
+  # subshell would hide the very var this test exists to assert on.
+  local prev="$PWD"; cd "$d" || return; builtin_secret_scan; rc=$?; cd "$prev" || return
+  if [ "$exp" = 0 ]; then
+    { [ "$rc" = 0 ] && [ -n "$SECRET_BLOCK_REASON" ]; } \
+      && ok "secret-scan $name (blocks with non-empty reason)" \
+      || fail "secret-scan $name (rc=$rc reason='[$SECRET_BLOCK_REASON]')"
+  else
+    { [ "$rc" = 1 ] && [ -z "$SECRET_BLOCK_REASON" ]; } \
+      && ok "secret-scan $name (passes, empty reason)" \
+      || fail "secret-scan $name (rc=$rc reason='[$SECRET_BLOCK_REASON]')"
+  fi
+  rm -rf "$d"
+}
+check_secret_reason "aws-key reason"  0 'AKIAIOSFODNN7EXAMPLE'
+check_secret_reason "no-match reason" 1 'x = 1'
 
 # Regression: a secret marker only on a REMOVED or context line is NOT being
 # introduced by the commit and must NOT block (else the loop dead-locks when a

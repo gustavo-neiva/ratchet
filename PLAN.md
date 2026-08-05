@@ -298,7 +298,12 @@ broken `bundle exec rspec` (system Ruby has no bundler 2.6.3 → 12 gate-REDs,
 committed in 7 turns. That win is locked in by the P0 doctor dry-run; M6 is the
 next round.
 
-- [ ] T6.1 (normal, serial) Tamper guard: stop dead-looping on a benign re-stamp.
+- [x] T6.1 (normal, serial) Tamper guard: stop dead-looping on a benign re-stamp.
+      DONE: shared `expected_protocol_block` + idempotent `stamp_protocol` +
+      `conf_tampered` benign-re-stamp guard shipped (suite 19). Real dead-loop
+      cause was `selftest.sh` sourcing `commands.sh` without `RATCHET_ROOT`
+      (unbound under `set -u`) → suite 19 crashed RED every turn; fixed by
+      exporting `RATCHET_ROOT` in the harness.
       touches: lib/commit-gate.sh (`conf_tampered`), lib/commands.sh
       (`stamp_protocol` + new shared `expected_protocol_block`)
       problem: `conf_tampered()` compares the staged AGENTS.md protocol block
@@ -343,7 +348,7 @@ next round.
         being human-owned. The shared builder is the whole point — init and the
         gate must not drift.
 
-- [ ] T6.2 (normal, serial) Bound watchdog reaping so a turn can't run far past TURN_TIMEOUT.
+- [IN PROGRESS] T6.2 (normal, serial) Bound watchdog reaping so a turn can't run far past TURN_TIMEOUT.
       touches: lib/run-turn.sh (`run_turn` kill/reap tail, after the watchdog loop)
       problem: three turns hit `class=timeout` at took=1816/1970/2365s against a
       1800s cap (cookbook turn 38; harbor). `took=` is measured at
@@ -397,7 +402,10 @@ next round.
       verify: bash test/selftest.sh (doc-only; no code change).
       constraints: doc-only. Never tick a genuinely-unshipped item — promote it.
 
-- [ ] T6.4 (trivial, serial) Lock in "builtin secret scan never blocks with an empty reason".
+- [x] T6.4 (trivial, serial) Lock in "builtin secret scan never blocks with an empty reason".
+      DONE: suite 11 now asserts a block (rc=0) always carries a non-empty
+      SECRET_BLOCK_REASON and a clean pass leaves it empty — non-repro in
+      current code, guard locks it in.
       touches: test/selftest.sh (suite 10/11 area — builtin secret scan)
       problem: 11 historical log lines read `BLOCKED: secret scan —  — NOT
       committing` (empty reason), incl. one on 2026-08-04 (ta_justo final
