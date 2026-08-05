@@ -309,7 +309,7 @@ because the harness is the only thing that injects them.
       constraints: bash 3.2; no re-introduction of stamp/tamper; keep every other
           doctor check (conf parse, tracker open, VERIFY_CMD dry-run) intact.
 
-- [IN PROGRESS] T3.3 (trivial) Document the loop-vs-interactive split and how it ports.
+- [x] T3.3 (trivial) Document the loop-vs-interactive split and how it ports.
       touches: README.md, skills/ratchet-plan/SKILL.md
       do: README: add a short subsection (near "The repo contract (4 files)" or
           "How it works") explaining that loop protocol travels in the harness
