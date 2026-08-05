@@ -403,15 +403,18 @@ next round.
       constraints: doc-only. Never tick a genuinely-unshipped item — promote it.
 
 - [x] T6.4 (trivial, serial) Lock in "builtin secret scan never blocks with an empty reason".
-      DONE: suite 11 now asserts a block (rc=0) always carries a non-empty
-      SECRET_BLOCK_REASON and a clean pass leaves it empty — non-repro in
-      current code, guard locks it in.
+      DONE: root cause was `builtin_secret_scan`'s empty-diff early-out
+      `return 0` — but 0=block, so a turn that staged no added lines (agent
+      printed the token without editing a file) false-blocked with an empty
+      reason, dead-looping the task. Fixed to `return 1` (clean) in
+      commit-gate.sh. suite 11 now asserts: a block always carries a non-empty
+      reason, a clean pass leaves it empty, AND an empty staged diff never
+      blocks (the live regression).
       touches: test/selftest.sh (suite 10/11 area — builtin secret scan)
       problem: 11 historical log lines read `BLOCKED: secret scan —  — NOT
       committing` (empty reason), incl. one on 2026-08-04 (ta_justo final
-      commit). Current `builtin_secret_scan()` cannot produce this — every
-      branch sets `SECRET_BLOCK_REASON` and the final `[ -n "$reason" ]` guard
-      returns false on empty — so it is most likely a stale-checkout artifact
+      commit). Confirmed live 2026-08-05: an empty staged diff hit the
+      `return 0` early-out, which the boolean caller reads as a secret hit
       from before the `144d1ec` rewrite. Non-reproducible today. Treat as
       non-repro and add a regression guard.
       do: Add selftest cases: (a) a staged diff that matches NO pattern (e.g.

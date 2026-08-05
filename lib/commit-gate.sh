@@ -30,7 +30,10 @@ builtin_secret_scan() {
   # An added line carrying the inline marker `ratchet:allow-secret` is exempt
   # (gitleaks-style allowlist) so test fixtures / docs can hold a secret SHAPE.
   diff="$(git diff --cached 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+ ' | grep -v 'ratchet:allow-secret')"
-  [ -n "$diff" ] || return 0
+  # No added lines to scan -> NOT a hit. This function's 0/1 is a boolean
+  # (0=block), so "nothing to scan" must return 1 (clean), never 0 (which the
+  # `elif builtin_secret_scan` caller reads as a hit -> empty-reason false block).
+  [ -n "$diff" ] || return 1
   # patterns: private key headers, AWS keys, OpenAI/Anthropic-style sk-/sk-ant,
   # generic api_key/secret assignments, JWTs, .env file additions.
   if printf '%s' "$diff" | grep -qiE -e '-----BEGIN ((RSA|EC|OPENSSH|DSA) )?PRIVATE KEY-----'; then

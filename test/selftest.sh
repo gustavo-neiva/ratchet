@@ -644,6 +644,20 @@ check_secret_reason() {  # NAME EXPECT_RC CONTENT
 check_secret_reason "aws-key reason"  0 'AKIAIOSFODNN7EXAMPLE'
 check_secret_reason "no-match reason" 1 'x = 1'
 
+# The live dead-loop cause: a staged tree with NO added lines (agent printed the
+# token without editing a file). `$diff` is empty -> the scan must return CLEAN
+# (rc=1, empty reason), never block. `elif builtin_secret_scan` reads rc=0 as a
+# hit, so an empty-diff rc=0 is the `BLOCKED: secret scan —  —` false block.
+check_secret_empty_diff() {
+  local d rc; d="$(mktemp -d)"; git -C "$d" init -q
+  local prev="$PWD"; cd "$d" || return; builtin_secret_scan; rc=$?; cd "$prev" || return
+  { [ "$rc" = 1 ] && [ -z "$SECRET_BLOCK_REASON" ]; } \
+    && ok "secret-scan empty-diff passes (no false block)" \
+    || fail "secret-scan empty-diff (rc=$rc reason='[$SECRET_BLOCK_REASON]')"
+  rm -rf "$d"
+}
+check_secret_empty_diff
+
 # Regression: a secret marker only on a REMOVED or context line is NOT being
 # introduced by the commit and must NOT block (else the loop dead-locks when a
 # file legitimately documents/tests a secret shape). Scan added lines only.

@@ -7,3 +7,4 @@
 
 - _(example)_ `npm test` must run from the repo root; a nested cwd makes it red.
 - **Task IDs:** Never wrap IDs in bold/italic markdown (`**T1.2**` breaks parser). Use plain `T1.2`, `A1`, or `N-slug`. Causes "task id unresolved" warning and `task=?` on all turns.
+- **Boolean shell funcs:** `builtin_secret_scan`/`conf_tampered` return 0=hit/block. Any early-out must `return 1` (clean), never `return 0` — an empty-diff `return 0` false-blocks every no-op turn with an empty reason and dead-loops the task.
