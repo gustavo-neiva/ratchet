@@ -380,7 +380,15 @@ next round.
         NOT change TURN_TIMEOUT semantics or the stall-kill path — only the
         post-deadline reap.
 
-- [ ] T6.3 (trivial, serial) Reconcile POSTMORTEM_FIX_PLAN.md with shipped reality.
+- [x] T6.3 (trivial, serial) Reconcile POSTMORTEM_FIX_PLAN.md with shipped reality.
+      DONE: every item verified against current source and ticked `[x]` with a
+      file:line pointer (P0.1 commands.sh:516-522, P0.2 :484-487, P1.1
+      tracker.sh:25,33,38,142-149, P1.2 commands.sh:503-505, P2.1
+      commit-gate.sh:127-138, P2.2 bin/ratchet:357-358,448-451, P3.1 README:343-346,
+      P3.2 contract.sh:24+commands.sh:538-545, P4.1 bin/ratchet:304-312, P4.2
+      :415-417, P5.1 common.sh:119, P5.2 :375-379). Folded the redundant
+      "Already done — verify only" block into the ticked lines and added a
+      header noting M6/PLAN.md superseded the file for any live-remaining work.
       touches: POSTMORTEM_FIX_PLAN.md
       problem: the file shows 4 `[x]` / 12 `[ ]`, but P0 (doctor VERIFY_CMD
       dry-run `commands.sh:499-506`; tracker↔AGENTS.md mismatch `:467`), P1
@@ -462,7 +470,7 @@ next round.
 >    a too-weak auto-pick fails the gate → strike → the existing cascade, so a
 >    wrong guess costs one turn, never a bad commit.
 
-- [ ] T7.1 (normal, serial) Vendor-neutral cost/capability cache (models.dev join).
+- [IN PROGRESS] T7.1 (normal, serial) Vendor-neutral cost/capability cache (models.dev join).
       touches: lib/model-cost.sh, bin/ratchet (_mod source list), test/selftest.sh
       do: Create `lib/model-cost.sh`. Add `model_cost_registry [refresh]`
           mirroring `pi_model_registry` in models.sh: serve a 24h cache at
