@@ -71,7 +71,7 @@ because the harness is the only thing that injects them.
 > guidance, and a loop turn carries its protocol in the prompt. Porting to other
 > repos is M3 — deliberately deferred so we feel the edges first (Product + DA).
 
-- [IN PROGRESS] T1.1 (hard, serial) Inject the rendered loop protocol into the per-turn prompt.
+- [x] T1.1 (hard, serial) Inject the rendered loop protocol into the per-turn prompt.
       touches: lib/common.sh, test/selftest.sh
       do: Today `build_default_prompt` (lib/common.sh:119-121) emits a generic
           "Do ONE discrete step … following the project's AGENTS.md instructions"
@@ -118,7 +118,7 @@ because the harness is the only thing that injects them.
       constraints: bash 3.2; best-effort render, never die; template read from
           $RATCHET_ROOT only; keep the .ratchet.conf-forbidden line.
 
-- [ ] T1.2 (normal, serial) Export RATCHET_LOOP=1 as the advisory loop signal.
+- [IN PROGRESS] T1.2 (normal, serial) Export RATCHET_LOOP=1 as the advisory loop signal.
       touches: lib/run-turn.sh, test/selftest.sh
       do: In run-turn.sh, right before the block that conditionally exports
           RATCHET_FANOUT (currently lib/run-turn.sh:62-65, inside run_turn, just
