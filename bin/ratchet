@@ -25,7 +25,7 @@ RATCHET_ROOT="$(cd -P "$(dirname "$_src")/.." && pwd)"
 unset _src _dir
 export RATCHET_ROOT
 
-for _mod in common contract tracker classify model-fallback models \
+for _mod in common contract tracker classify model-fallback models model-cost \
             commit-gate session-sanitize observability run-turn commands render; do
   # shellcheck disable=SC1090
   . "$RATCHET_ROOT/lib/${_mod}.sh"

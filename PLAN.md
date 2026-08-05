@@ -470,7 +470,7 @@ next round.
 >    a too-weak auto-pick fails the gate → strike → the existing cascade, so a
 >    wrong guess costs one turn, never a bad commit.
 
-- [IN PROGRESS] T7.1 (normal, serial) Vendor-neutral cost/capability cache (models.dev join).
+- [x] T7.1 (normal, serial) Vendor-neutral cost/capability cache (models.dev join).
       touches: lib/model-cost.sh, bin/ratchet (_mod source list), test/selftest.sh
       do: Create `lib/model-cost.sh`. Add `model_cost_registry [refresh]`
           mirroring `pi_model_registry` in models.sh: serve a 24h cache at
@@ -499,7 +499,7 @@ next round.
           enrichment if absent); network failure is non-fatal; cache pattern
           identical to models.registry; additive source line only.
 
-- [ ] T7.2 (normal, serial) MODEL_RANK: the one manual ordering + tier auto-slice.
+- [IN PROGRESS] T7.2 (normal, serial) MODEL_RANK: the one manual ordering + tier auto-slice.
       touches: lib/model-select.sh, lib/common.sh (MODEL_RANK default + doc),
           bin/ratchet (_mod source list), test/selftest.sh
       do: Create `lib/model-select.sh`. `MODEL_RANK` (new conf key, optional) is
