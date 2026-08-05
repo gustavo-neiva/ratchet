@@ -52,7 +52,7 @@ because the harness is the only thing that injects them.
 
 ## Milestone 0 — safety net (serial)
 
-- [ ] T0.1 (trivial, serial) Baseline: confirm the suite is green and record the count.
+- [x] T0.1 (trivial, serial) Baseline: confirm the suite is green and record the count.
       touches: LEARNINGS.md
       do: Run `bash test/selftest.sh`. Confirm it exits 0. Append one line to
           LEARNINGS.md recording the pass count (e.g. "loop/human split baseline:
@@ -71,7 +71,7 @@ because the harness is the only thing that injects them.
 > guidance, and a loop turn carries its protocol in the prompt. Porting to other
 > repos is M3 — deliberately deferred so we feel the edges first (Product + DA).
 
-- [ ] T1.1 (hard, serial) Inject the rendered loop protocol into the per-turn prompt.
+- [IN PROGRESS] T1.1 (hard, serial) Inject the rendered loop protocol into the per-turn prompt.
       touches: lib/common.sh, test/selftest.sh
       do: Today `build_default_prompt` (lib/common.sh:119-121) emits a generic
           "Do ONE discrete step … following the project's AGENTS.md instructions"
