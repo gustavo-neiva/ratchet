@@ -72,16 +72,35 @@ all_benched() {
 }
 
 # chain_for_tier TIER  — echo the effective model chain for plan|build|light.
-# Fallback: unset tier → $MODELS (the flat global chain).
+# Override precedence: tier-specific (*_MODELS) → flat MODELS → suggest_chain → empty.
+# Empty on no config: caller's existing "no models configured" die path still fires.
 chain_for_tier() {
-  local tier="$1" chain=""
+  local tier="$1" chain="" derived=""
   case "$tier" in
     plan)  chain="$PLAN_MODELS" ;;
     build) chain="$BUILD_MODELS" ;;
     light) chain="$LIGHT_MODELS" ;;
     *)     chain="" ;;
   esac
-  [ -n "$chain" ] && echo "$chain" || echo "$MODELS"
+  # tier-specific override wins
+  if [ -n "$chain" ]; then
+    echo "$chain"
+    return 0
+  fi
+  # flat MODELS override wins
+  if [ -n "$MODELS" ]; then
+    echo "$MODELS"
+    return 0
+  fi
+  # both empty: try auto-derivation via suggest_chain
+  derived="$(suggest_chain "$tier" 2>/dev/null)" || true
+  if [ -n "$derived" ]; then
+    echo "$derived"
+    return 0
+  fi
+  # all empty: echo nothing, caller handles the die path
+  echo ""
+  return 1
 }
 
 # thinking_for_tier TIER  — echo the effective thinking level for a tier.

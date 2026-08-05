@@ -48,9 +48,10 @@ ALLOWED_PROVIDERS=""            # comma list; unset = global chain. Data-governa
 THINKING=""                     # reasoning level passed each turn (off|minimal|low|medium|high|xhigh)
 
 # --- tiered model routing (v1.1) ---
-PLAN_MODELS=""                  # comma-separated chain for plan-drafting turns (unset → MODELS)
-BUILD_MODELS=""                 # comma-separated chain for normal/hard tasks (unset → MODELS)
-LIGHT_MODELS=""                 # comma-separated chain for trivial tasks (unset → MODELS)
+MODEL_RANK=""                   # comma-separated ordering: provider/id or bare provider, strongest first (auto-derives tiers; optional)
+PLAN_MODELS=""                  # comma-separated chain for plan-drafting turns (unset → MODELS or auto-derived)
+BUILD_MODELS=""                 # comma-separated chain for normal/hard tasks (unset → MODELS or auto-derived)
+LIGHT_MODELS=""                 # comma-separated chain for trivial tasks (unset → MODELS or auto-derived)
 THINKING_PLAN=""                # thinking level for PLAN tier (unset → THINKING)
 THINKING_BUILD=""               # thinking level for BUILD tier (unset → THINKING)
 THINKING_LIGHT=""               # thinking level for LIGHT tier (unset → THINKING)

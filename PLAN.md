@@ -499,7 +499,7 @@ next round.
           enrichment if absent); network failure is non-fatal; cache pattern
           identical to models.registry; additive source line only.
 
-- [IN PROGRESS] T7.2 (normal, serial) MODEL_RANK: the one manual ordering + tier auto-slice.
+- [x] T7.2 (normal, serial) MODEL_RANK: the one manual ordering + tier auto-slice.
       touches: lib/model-select.sh, lib/common.sh (MODEL_RANK default + doc),
           bin/ratchet (_mod source list), test/selftest.sh
       do: Create `lib/model-select.sh`. `MODEL_RANK` (new conf key, optional) is
@@ -537,7 +537,7 @@ next round.
           authoritative; models.dev only orders the unranked tail (best-effort,
           skip if no meta); additive.
 
-- [ ] T7.3 (hard, serial) Wire suggest_chain into chain_for_tier (override-preserving).
+- [x] T7.3 (hard, serial) Wire suggest_chain into chain_for_tier (override-preserving).
       touches: lib/model-fallback.sh (chain_for_tier), test/selftest.sh
       do: In `chain_for_tier`, keep the EXACT current precedence as the override
           path: if the tier's explicit key (`PLAN_MODELS`/`BUILD_MODELS`/
@@ -565,7 +565,7 @@ next round.
           behavior (guard the existing 300+ line-format + stats tests); only the
           both-empty branch is new; no new die/hang introduced.
 
-- [ ] T7.4 (normal, serial) `ratchet models` shows cost + derived chains.
+- [IN PROGRESS] T7.4 (normal, serial) `ratchet models` shows cost + derived chains.
       touches: lib/models.sh (cmd_models list), test/selftest.sh
       do: In `cmd_models list`, next to each chain member's `[ok|UNKNOWN]`
           registry mark, append its models.dev cost when joined:

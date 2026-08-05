@@ -47,6 +47,7 @@ STEP_TOKEN="STEP_COMPLETE"; DONE_TOKEN="ALL_DONE"
 . "$RR/lib/commands.sh"           # cmd_status
 . "$RR/lib/models.sh"             # ratchet models (chain ops, upsert, registry)
 . "$RR/lib/model-cost.sh"         # model cost/capability cache from models.dev
+. "$RR/lib/model-select.sh"       # automatic tier selection from MODEL_RANK
 . "$RR/lib/render.sh"             # pure render functions
 . "$RR/lib/observability.sh"      # avg_turn_secs, show_excerpt
 
@@ -1412,6 +1413,202 @@ fi
 rm -rf "$tmp21"
 
 rm -rf "$RATCHET_HOME"   # isolated test home (see top of file)
+
+echo "== suite 22: model-select (MODEL_RANK + tier auto-slice) =="
+
+# Create a fixture with pi registry + cost cache + MODEL_RANK
+tmp22="$(mktemp -d)"
+export RATCHET_HOME="$tmp22"
+mkdir -p "$tmp22"
+
+# Fixture pi registry: 5 available models
+cat > "$tmp22/models.registry" <<'FIXTURE22REG'
+anthropic/claude-opus-4-8
+anthropic/claude-sonnet-4-5
+zai/glm-5.2
+zai/glm-4.5-air
+kimi-coding/k3
+FIXTURE22REG
+
+# Fixture cost cache: 4 models with cost (kimi-coding/k3 via moonshotai alias)
+cat > "$tmp22/models.cost" <<'FIXTURE22COST'
+anthropic/claude-opus-4-8	5	25	true	true	200000
+anthropic/claude-sonnet-4-5	3	15	true	true	200000
+zai/glm-5.2	1.4	4.4	true	true	128000
+zai/glm-4.5-air	0.5	2.0	true	true	128000
+moonshotai/k3	0.3	1.0	true	true	64000
+FIXTURE22COST
+
+# Test 1: ranked_available_models with MODEL_RANK set
+MODEL_RANK="anthropic/claude-opus-4-8,anthropic/claude-sonnet-4-5,zai/glm-5.2,zai/glm-4.5-air"
+ALLOWED_PROVIDERS=""  # no filter
+ranked="$(ranked_available_models)"
+# Should return ranked in order, then unranked (kimi-coding/k3) sorted by cost
+if echo "$ranked" | head -1 | grep -q "anthropic/claude-opus-4-8"; then
+  ok "ranked_available_models: top model is claude-opus-4-8"
+else
+  fail "ranked_available_models: expected opus-4-8 first, got=$(echo "$ranked" | head -1)"
+fi
+
+if echo "$ranked" | tail -1 | grep -q "kimi-coding/k3"; then
+  ok "ranked_available_models: unranked model kimi-coding/k3 appended last"
+else
+  fail "ranked_available_models: expected k3 appended, got=$(echo "$ranked" | tail -1)"
+fi
+
+# Test 2: suggest_chain plan (top + fallback)
+chain_plan="$(suggest_chain plan)"
+if echo "$chain_plan" | grep -q "anthropic/claude-opus-4-8" && echo "$chain_plan" | grep -q "anthropic/claude-sonnet-4-5"; then
+  ok "suggest_chain plan: contains opus-4-8 and sonnet-4-5"
+else
+  fail "suggest_chain plan: got='$chain_plan'"
+fi
+
+# Test 3: suggest_chain light (bottom + one-up)
+chain_light="$(suggest_chain light)"
+if echo "$chain_light" | grep -q "kimi-coding/k3"; then
+  ok "suggest_chain light: contains cheapest model (kimi-coding/k3)"
+else
+  fail "suggest_chain light: expected k3, got='$chain_light'"
+fi
+
+# Test 4: suggest_chain build (middle + fallbacks down)
+chain_build="$(suggest_chain build)"
+if echo "$chain_build" | grep -q "anthropic/claude-sonnet-4-5"; then
+  ok "suggest_chain build: contains middle model (sonnet-4-5)"
+else
+  fail "suggest_chain build: got='$chain_build'"
+fi
+
+# Test 5: ALLOWED_PROVIDERS filter
+ALLOWED_PROVIDERS="zai"
+ranked_zai="$(ranked_available_models)"
+if echo "$ranked_zai" | grep -q "anthropic"; then
+  fail "ranked_available_models with ALLOWED_PROVIDERS=zai: should not contain anthropic"
+else
+  ok "ranked_available_models: ALLOWED_PROVIDERS=zai filters correctly"
+fi
+
+if echo "$ranked_zai" | grep -q "zai/glm-5.2"; then
+  ok "ranked_available_models: zai/glm-5.2 present after filter"
+else
+  fail "ranked_available_models: expected zai/glm-5.2, got='$ranked_zai'"
+fi
+
+# Test 6: MODEL_RANK unset with 2+ models returns models (no explicit ranking but not empty)
+MODEL_RANK=""
+ALLOWED_PROVIDERS=""
+ranked_unset="$(ranked_available_models)"
+if [ -n "$ranked_unset" ]; then
+  ok "ranked_available_models: MODEL_RANK unset returns available models"
+else
+  fail "ranked_available_models: should return models even when MODEL_RANK unset"
+fi
+
+# Test 7: suggest_chain with MODEL_RANK unset returns empty (no reliable ranking)
+MODEL_RANK=""
+if suggest_chain plan >/dev/null 2>&1; then
+  fail "suggest_chain: should return empty (rc1) when MODEL_RANK unset"
+else
+  ok "suggest_chain: returns empty when MODEL_RANK unset (no skill ranking)"
+fi
+
+rm -rf "$tmp22"
+
+echo ""
+echo "== suite 23: chain_for_tier override-preserving wire-in (T7.3) =="
+
+# Create a fixture with pi registry + cost cache + MODEL_RANK
+tmp23="$(mktemp -d)"
+export RATCHET_HOME="$tmp23"
+mkdir -p "$tmp23"
+
+# Fixture pi registry: 4 available models
+cat > "$tmp23/models.registry" <<'FIXTURE23REG'
+anthropic/claude-opus-4-8
+anthropic/claude-sonnet-4-5
+zai/glm-5.2
+zai/glm-4.5-air
+FIXTURE23REG
+
+# Fixture cost cache
+cat > "$tmp23/models.cost" <<'FIXTURE23COST'
+anthropic/claude-opus-4-8	5	25	true	true	200000
+anthropic/claude-sonnet-4-5	3	15	true	true	200000
+zai/glm-5.2	1.4	4.4	true	true	128000
+zai/glm-4.5-air	0.5	2.0	true	true	128000
+FIXTURE23COST
+
+# Test 1: Override-wins — tier-specific key set → byte-identical to today
+BUILD_MODELS="custom/model-1,custom/model-2"
+MODELS=""
+MODEL_RANK="anthropic/claude-opus-4-8,anthropic/claude-sonnet-4-5,zai/glm-5.2,zai/glm-4.5-air"
+ALLOWED_PROVIDERS=""
+
+got_override="$(chain_for_tier build)"
+if [ "$got_override" = "custom/model-1,custom/model-2" ]; then
+  ok "chain_for_tier override-wins: BUILD_MODELS returned unchanged"
+else
+  fail "chain_for_tier override-wins: expected BUILD_MODELS, got='$got_override'"
+fi
+
+# Test 2: Flat MODELS override — tier-specific unset, MODELS set → returns MODELS
+PLAN_MODELS=""
+BUILD_MODELS=""
+LIGHT_MODELS=""
+MODELS="flat/model-a,flat/model-b"
+MODEL_RANK="anthropic/claude-opus-4-8,anthropic/claude-sonnet-4-5,zai/glm-5.2,zai/glm-4.5-air"
+
+got_flat="$(chain_for_tier build)"
+if [ "$got_flat" = "flat/model-a,flat/model-b" ]; then
+  ok "chain_for_tier flat-override: MODELS returned when tier-specific unset"
+else
+  fail "chain_for_tier flat-override: expected MODELS, got='$got_flat'"
+fi
+
+# Test 3: Derive-when-empty — both tier and MODELS empty, MODEL_RANK set → suggest_chain slice
+PLAN_MODELS=""
+BUILD_MODELS=""
+LIGHT_MODELS=""
+MODELS=""
+MODEL_RANK="anthropic/claude-opus-4-8,anthropic/claude-sonnet-4-5,zai/glm-5.2,zai/glm-4.5-air"
+
+got_derived="$(chain_for_tier plan)"
+if [ -n "$got_derived" ] && echo "$got_derived" | grep -q "anthropic/claude-opus-4-8"; then
+  ok "chain_for_tier derive: plan tier returns suggest_chain slice"
+else
+  fail "chain_for_tier derive: expected derived chain, got='$got_derived'"
+fi
+
+got_light="$(chain_for_tier light)"
+if [ -n "$got_light" ] && echo "$got_light" | grep -q "zai/glm-4.5-air"; then
+  ok "chain_for_tier derive: light tier returns cheapest model"
+else
+  fail "chain_for_tier derive light: expected cheapest model, got='$got_light'"
+fi
+
+# Test 4: Empty-when-nothing — everything empty → echoes empty, caller handles die
+PLAN_MODELS=""
+BUILD_MODELS=""
+LIGHT_MODELS=""
+MODELS=""
+MODEL_RANK=""
+
+got_empty="$(chain_for_tier build)"
+if [ -z "$got_empty" ]; then
+  ok "chain_for_tier empty-when-nothing: returns empty when no config"
+else
+  fail "chain_for_tier empty-when-nothing: expected empty, got='$got_empty'"
+fi
+
+# Verify rc1 when empty (caller checks this)
+if chain_for_tier build >/dev/null 2>&1; then
+  fail "chain_for_tier empty-when-nothing: should return rc1"
+else
+  ok "chain_for_tier empty-when-nothing: returns rc1 for caller's die path"
+fi
+
+rm -rf "$tmp23"
 
 echo ""
 echo "selftest: $PASS passed, $FAIL failed"

@@ -10,3 +10,5 @@
 - **Boolean shell funcs:** `builtin_secret_scan`/`conf_tampered` return 0=hit/block. Any early-out must `return 1` (clean), never `return 0` — an empty-diff `return 0` false-blocks every no-op turn with an empty reason and dead-loops the task.
 ## auto-captured
 [2026-08-05 00:42:45]   commit gate RED — NOT committing; leaving work for next turn to repair.  # 2026-08-05T03:42:45Z
+## auto-captured
+[2026-08-05 00:54:42]   commit gate RED — NOT committing; leaving work for next turn to repair.  # 2026-08-05T03:54:42Z
