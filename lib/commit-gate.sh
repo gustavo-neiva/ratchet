@@ -52,29 +52,7 @@ builtin_secret_scan() {
   [ -n "$SECRET_BLOCK_REASON" ]
 }
 
-# conf_tampered -> 0 if a line inside the AGENTS.md protocol markers is in the
-# staged diff (the agent tried to rewrite its own contract). .ratchet.conf is
-# handled separately (silently unstaged) — it is never a loop commit and must
-# never fail a turn (see commit_turn).
-conf_tampered() {
-  git diff --cached --name-only 2>/dev/null | grep -qE '(^|/)AGENTS\.md$' || return 1
-  # Compare the marker-delimited managed block between HEAD and the staged file.
-  # Any difference (markers OR the content between them) is tampering. sed range
-  # is inclusive of the two marker lines, so removing a marker also trips it.
-  local ext='ratchet-protocol:v[0-9]*:begin' end='ratchet-protocol:v[0-9]*:end'
-  local head_block staged_block
-  head_block=$(git show HEAD:AGENTS.md 2>/dev/null | sed -n "/$ext/,/$end/p")
-  staged_block=$(git show :AGENTS.md 2>/dev/null | sed -n "/$ext/,/$end/p")
-  [ "$head_block" = "$staged_block" ] && return 1
-  
-  # Benign re-stamp guard: if staged != HEAD but staged == expected block from
-  # live conf, it's a legitimate `ratchet init` re-stamp, not tampering.
-  local expected_block
-  expected_block="$(expected_protocol_block "${TRACKER_FILE:-PLAN.md}" "${VERIFY_CMD:-}" "${STEP_TOKEN:-STEP_COMPLETE}" "${DONE_TOKEN:-ALL_DONE}" | sed -n "/$ext/,/$end/p")"
-  [ "$staged_block" = "$expected_block" ] && return 1
-  
-  return 0
-}
+
 
 # commit_turn TURN MODEL -> 0 if committed (or cleanly nothing-to-commit),
 # 1 if the verify gate was RED / a secret / contract tamper was found (the
@@ -97,17 +75,7 @@ commit_turn() {
   # stays below.
   git reset -q -- .ratchet.conf 2>/dev/null || true
 
-  # 1) contract-tamper guard: never let the agent rewrite the AGENTS.md protocol
-  # block (a tracked-file edit that IS restorable, so blocking self-heals).
-  if conf_tampered; then
-    emit "  BLOCKED: turn tried to edit the AGENTS.md protocol markers (human-owned)."
-    emit "  Reverting that change from staging."
-    git reset -q -- AGENTS.md 2>/dev/null || true
-    git checkout -- AGENTS.md 2>/dev/null || true   # best-effort restore
-    return 1
-  fi
-
-  # 2) secret scan (gitleaks if present, else builtin).
+  # 1) secret scan (gitleaks if present, else builtin).
   if command -v gitleaks >/dev/null 2>&1; then
     if ! gitleaks protect --staged --redact >/dev/null 2>>"$LOOP_LOG"; then
       emit "  BLOCKED: gitleaks found a secret in the staged diff — NOT committing."
@@ -119,7 +87,7 @@ commit_turn() {
     return 1
   fi
 
-  # 3) hard green gate: re-verify before committing anything.
+  # 2) hard green gate: re-verify before committing anything.
   if [ "$COMMIT_VERIFY_GATE" = 1 ]; then
     if [ -n "$VERIFY_CMD" ]; then
       emit "  commit gate: running '$VERIFY_CMD' …"
@@ -142,13 +110,13 @@ commit_turn() {
     fi
   fi
 
-  # 4) nothing staged? idempotent turn — fine.
+  # 3) nothing staged? idempotent turn — fine.
   if git diff --cached --quiet 2>/dev/null; then
     emit "  nothing staged to commit (idempotent turn)."
     return 0
   fi
 
-  # 5) ONE commit with a traceable subject.
+  # 4) ONE commit with a traceable subject.
   local subject
   subject="$(tracker_completed_subject)"
   if git commit -q -m "auto(ratchet): turn ${turn} ${model} — ${subject}" \

@@ -25,7 +25,7 @@ detect_verify_cmd() {
 }
 
 # expected_protocol_block TRACKER VERIFY STEP DONE -> render the protocol block
-# with live conf values. Shared by stamp_protocol (write) and conf_tampered (check).
+# with live conf values. Used by build_default_prompt for per-turn injection.
 expected_protocol_block() {
   local tr="$1" vc="$2" st="$3" dt="$4" tpl
   tpl="$RATCHET_ROOT/templates/AGENTS.protocol.md"
@@ -34,39 +34,7 @@ expected_protocol_block() {
       -e "s|{{STEP_TOKEN}}|$st|g" -e "s|{{DONE_TOKEN}}|$dt|g" "$tpl"
 }
 
-# stamp_protocol DIR TRACKER VERIFY STEP DONE -> write the managed marker block
-# into AGENTS.md (insert if absent, re-stamp if an older block exists).
-stamp_protocol() {
-  local dir="$1" tr="$2" vc="$3" st="$4" dt="$5"
-  local agents="$dir/AGENTS.md"
-  local block
-  block="$(expected_protocol_block "$tr" "$vc" "$st" "$dt")"
-  
-  # Idempotent: skip rewrite if existing block already matches
-  if [ -f "$agents" ] && grep -q 'ratchet-protocol:.*:begin' "$agents"; then
-    local ext='ratchet-protocol:v[0-9]*:begin' end='ratchet-protocol:v[0-9]*:end'
-    local existing_block expected_block_part
-    existing_block=$(sed -n "/$ext/,/$end/p" "$agents")
-    expected_block_part=$(printf '%s' "$block" | sed -n "/$ext/,/$end/p")
-    if [ "$existing_block" = "$expected_block_part" ]; then
-      return 0  # already stamped with this exact block
-    fi
-    # re-stamp: replace from begin..end with the fresh block (preserves prose outside)
-    local tmp blockf; tmp=$(mktemp); blockf=$(mktemp)
-    printf '%s\n' "$block" > "$blockf"
-    awk -v blockfile="$blockf" '
-      /ratchet-protocol:.*:begin/ {while ((getline < blockfile) > 0) print; skip=1; next}
-      /ratchet-protocol:.*:end/   {skip=0; next}
-      !skip {print}
-    ' "$agents" > "$tmp" && mv "$tmp" "$agents" && rm -f "$blockf"
-  else
-    if [ -f "$agents" ]; then
-      printf '\n\n%s\n' "$block" >> "$agents"
-    else
-      printf '%s\n' "$block" > "$agents"
-    fi
-  fi
-}
+
 
 # ----------------------------- ratchet init ----------------------------------
 cmd_init() {
@@ -104,9 +72,27 @@ cmd_init() {
   # 4) LEARNINGS.md (advisory memory) if absent.
   [ -f "$dir/LEARNINGS.md" ] || cp "$RATCHET_ROOT/templates/LEARNINGS.md" "$dir/LEARNINGS.md"
 
-  # 5) stamp the AGENTS.md protocol block (localized tracker/tokens/verify).
-  stamp_protocol "$dir" "$tr" "$vc" "$STEP_TOKEN" "$DONE_TOKEN"
-  emit "  stamped AGENTS.md protocol block (v$RATCHET_PROTOCOL_VERSION)"
+  # 5) AGENTS.md migration: strip legacy loop-protocol block, seed human template if needed.
+  local agents="$dir/AGENTS.md" migrated=0
+  if [ -f "$agents" ] && grep -q 'ratchet-protocol:.*:begin' "$agents"; then
+    local tmp; tmp=$(mktemp)
+    awk '
+      /ratchet-protocol:.*:begin/ {skip=1; next}
+      /ratchet-protocol:.*:end/   {skip=0; next}
+      !skip {print}
+    ' "$agents" > "$tmp" && mv "$tmp" "$agents"
+    emit "  migrated legacy loop block out of AGENTS.md"
+    migrated=1
+  fi
+  # Seed if absent or empty after migration
+  if [ ! -f "$agents" ] || [ ! -s "$agents" ] || ! grep -q '[^[:space:]]' "$agents" 2>/dev/null; then
+    cp "$RATCHET_ROOT/templates/AGENTS.human.md" "$agents"
+    if [ "$migrated" -eq 1 ]; then
+      emit "  seeded human AGENTS.md (no content after marker strip)"
+    else
+      emit "  seeded human AGENTS.md"
+    fi
+  fi
 
   # 6) .gitignore audit — keep loop junk AND the human-owned conf out of commits.
   # .ratchet.conf MUST be ignored: the commit gate's `git add -A` would otherwise
@@ -473,23 +459,16 @@ cmd_doctor() {
     pr_fail "no .ratchet.conf (run: ratchet init $dir)"
   fi
 
-  # protocol markers present + current in AGENTS.md
+  # protocol markers (transitional: optional until T3.1 seeds human AGENTS.md)
   local agents="$dir/AGENTS.md"
   if [ -f "$agents" ]; then
-    if grep -q "ratchet-protocol:v$RATCHET_PROTOCOL_VERSION:begin" "$agents"; then
-      pr_ok "AGENTS.md protocol markers current (v$RATCHET_PROTOCOL_VERSION)"
-      # verify tracker filename matches
-      local _tr="${TRACKER_FILE:-$(detect_tracker_file "$dir")}"
-      if [ -n "$_tr" ] && ! grep -q "$_tr" "$agents"; then
-        pr_fail "AGENTS.md references a different tracker than TRACKER_FILE=$_tr (re-stamp: ratchet init $dir)"
-      fi
-    elif grep -q 'ratchet-protocol:.*:begin' "$agents"; then
-      pr_fail "AGENTS.md protocol is STALE (re-stamp: ratchet init $dir)"
+    if grep -q 'ratchet-protocol:.*:begin' "$agents"; then
+      pr_ok "AGENTS.md: legacy protocol block found (migration in T3.1)"
     else
-      pr_fail "AGENTS.md has no protocol markers (run: ratchet init $dir)"
+      pr_ok "AGENTS.md: no protocol markers (harness-prompt delivery)"
     fi
   else
-    pr_fail "no AGENTS.md (run: ratchet init $dir)"
+    pr_ok "AGENTS.md: not yet seeded (created by T3.1)"
   fi
 
   # tracker exists, parses, has an open task
@@ -523,12 +502,8 @@ cmd_doctor() {
     esac
   else pr_fail "VERIFY_CMD is EMPTY — set it in .ratchet.conf (no-gate is loud by design)"; fi
 
-  # tokens consistent between conf and stamped block
-  if [ -f "$agents" ] && grep -q "token \`$STEP_TOKEN\`" "$agents" && grep -q "token \`$DONE_TOKEN\`" "$agents"; then
-    pr_ok "tokens consistent (conf <-> AGENTS.md)"
-  else
-    pr_fail "tokens inconsistent — re-stamp (ratchet init $dir)"
-  fi
+  # tokens (transitional: skip check until T3.1 - protocol now in prompt)
+  pr_ok "tokens: defined in conf (prompt delivery)"
 
   # secret-scan tool availability
   if command -v gitleaks >/dev/null 2>&1; then pr_ok "gitleaks available (rich secret scan)"

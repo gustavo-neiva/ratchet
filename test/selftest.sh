@@ -457,16 +457,11 @@ EOF
 if "$RATCHET" init "$tmp" >>"$tmp/init.log" 2>&1; then ok "ratchet init"
 else fail "ratchet init (see $tmp/init.log)"; fi
 
-# fanout protocol block must be in template and stamped file (T6.3)
+# fanout protocol block must be in template (used for per-turn prompt injection)
 if grep -q "Fanout strategy" "$RR/templates/AGENTS.protocol.md"; then
   ok "template contains fanout protocol"
 else
   fail "template missing fanout protocol block"
-fi
-if grep -q "Fanout strategy" "$tmp/AGENTS.md"; then
-  ok "ratchet init stamped fanout protocol"
-else
-  fail "stamped AGENTS.md missing fanout protocol"
 fi
 
 git -C "$tmp" init -q
@@ -677,30 +672,20 @@ check_secret_removed_only() {
 }
 check_secret_removed_only
 
-# Contract-tamper guard (commit_turn): editing the AGENTS.md protocol markers
-# blocks; an untracked .ratchet.conf swept in by `git add -A` must NOT fail the
-# turn (it is silently unstaged) — the bug that dead-locked a repo whose
-# .ratchet.conf wasn't gitignored.
-check_tamper() {
+# Verify .ratchet.conf is still unstaged by commit_turn (untracked conf must not fail turn)
+check_conf_unstaged() {
   local d
   d="$(mktemp -d)"; git -C "$d" init -q
   git -C "$d" config user.email t@t; git -C "$d" config user.name t
-  printf '<!-- ratchet-protocol:v1:begin -->\nrules\n<!-- ratchet-protocol:v1:end -->\n' > "$d/AGENTS.md"
   printf 'x\n' > "$d/file.txt"
-  git -C "$d" add AGENTS.md file.txt; git -C "$d" commit -qm init
-  # (a) untracked .ratchet.conf present + a normal edit -> conf silently unstaged, NOT a tamper
+  git -C "$d" add file.txt; git -C "$d" commit -qm init
   printf 'MODELS=a/b\n' > "$d/.ratchet.conf"
   printf 'y\n' > "$d/file.txt"
-  ( cd "$d" && git add -A && git reset -q -- .ratchet.conf 2>/dev/null; conf_tampered ) && \
-    fail "tamper guard: untracked .ratchet.conf wrongly flagged" || ok "tamper guard: untracked .ratchet.conf not flagged"
-  # (b) editing inside the AGENTS.md protocol markers -> tamper
-  git -C "$d" checkout -q -- file.txt 2>/dev/null
-  printf '<!-- ratchet-protocol:v1:begin -->\nHACKED\n<!-- ratchet-protocol:v1:end -->\n' > "$d/AGENTS.md"
-  ( cd "$d" && git add -A; conf_tampered ) && ok "tamper guard: AGENTS.md marker edit blocked" || \
-    fail "tamper guard: AGENTS.md marker edit NOT blocked (dead regex?)"
+  ( cd "$d" && git add -A && git reset -q -- .ratchet.conf 2>/dev/null && ! git diff --cached --name-only | grep -q '.ratchet.conf' ) && \
+    ok "conf unstaged: .ratchet.conf not in staging after reset" || fail "conf unstaged: .ratchet.conf still staged"
   rm -rf "$d"
 }
-check_tamper
+check_conf_unstaged
 
 echo ""
 echo "== suite 12: --cheap flag + staged-changes startup warning =="
@@ -1282,75 +1267,7 @@ PATH="$tmpp:$PATH" "$RATCHET" models add zai/glm-5.2 --repo -d "$tmpm" >/dev/nul
 
 rm -rf "$tmpp" "$tmpm"
 
-# --- suite 19: protocol block tamper guard (expected_protocol_block + conf_tampered) ---
-echo "== suite 19: protocol block tamper guard (T6.1) =="
 
-# Create a fixture repo to test protocol block stamping and tamper detection
-tmpt="$(mktemp -d)"
-trap "rm -rf '$tmpt'" EXIT
-git -C "$tmpt" init -q
-mkdir -p "$tmpt/.ratchet"
-
-# Set up conf values for testing
-TRACKER_FILE="PLAN.md"
-VERIFY_CMD="bin/test"
-STEP_TOKEN="STEP_COMPLETE"
-DONE_TOKEN="ALL_DONE"
-
-# Test 1: expected_protocol_block generates block with substitutions
-expected_block="$(expected_protocol_block "$TRACKER_FILE" "$VERIFY_CMD" "$STEP_TOKEN" "$DONE_TOKEN")"
-printf '%s' "$expected_block" | grep -q 'PLAN.md' && printf '%s' "$expected_block" | grep -q 'bin/test' \
-  && ok "expected_protocol_block substitutes config values" || fail "expected_protocol_block substitution"
-
-# Test 2: stamp_protocol creates AGENTS.md with the expected block
-stamp_protocol "$tmpt" "$TRACKER_FILE" "$VERIFY_CMD" "$STEP_TOKEN" "$DONE_TOKEN"
-[ -f "$tmpt/AGENTS.md" ] && grep -q 'ratchet-protocol:v1:begin' "$tmpt/AGENTS.md" \
-  && ok "stamp_protocol creates AGENTS.md with markers" || fail "stamp_protocol create"
-
-# Test 3: stamp_protocol is idempotent (no-op on same config)
-cp "$tmpt/AGENTS.md" "$tmpt/AGENTS.md.before"
-stamp_protocol "$tmpt" "$TRACKER_FILE" "$VERIFY_CMD" "$STEP_TOKEN" "$DONE_TOKEN"
-diff -q "$tmpt/AGENTS.md" "$tmpt/AGENTS.md.before" >/dev/null 2>&1 \
-  && ok "stamp_protocol is idempotent (no-op on same config)" || fail "stamp_protocol idempotent"
-
-# Test 4: commit AGENTS.md and set up git staging for tamper tests
-git -C "$tmpt" add AGENTS.md
-git -C "$tmpt" commit -q -m "initial AGENTS.md"
-
-# Test 5: conf_tampered returns false (not tampered) when nothing is staged
-cd "$tmpt" || exit 1
-conf_tampered && fail "conf_tampered false-positive on clean tree" || ok "conf_tampered clean tree"
-
-# Test 6: conf_tampered returns false when AGENTS.md is staged but matches HEAD
-git add AGENTS.md  # no actual change
-conf_tampered && fail "conf_tampered false-positive on unchanged staged file" || ok "conf_tampered unchanged staged"
-
-# Test 7: benign re-stamp (VERIFY_CMD changed) -> staged block = expected -> NOT tampered
-VERIFY_CMD="bin/new-test"
-stamp_protocol "$tmpt" "$TRACKER_FILE" "$VERIFY_CMD" "$STEP_TOKEN" "$DONE_TOKEN"
-git add AGENTS.md
-conf_tampered && fail "conf_tampered should allow benign re-stamp" || ok "conf_tampered allows benign re-stamp"
-cd - >/dev/null
-
-# Test 8: real tampering (agent rewrites block to arbitrary text) -> IS tampered
-git -C "$tmpt" reset -q HEAD AGENTS.md  # unstage the benign re-stamp
-git -C "$tmpt" checkout -- AGENTS.md      # restore HEAD version
-cd "$tmpt" || exit 1
-# Simulate agent tampering: rewrite protocol block to garbage
-sed -i.bak 's/ratchet-protocol:v1:begin/TAMPERED-MARKER/g' AGENTS.md
-git add AGENTS.md
-conf_tampered && ok "conf_tampered detects real tampering" || fail "conf_tampered should detect tampering"
-cd - >/dev/null
-
-# Test 9: expected_protocol_block equality with stamp_protocol output
-VERIFY_CMD="bin/test"
-expected="$(expected_protocol_block "$TRACKER_FILE" "$VERIFY_CMD" "$STEP_TOKEN" "$DONE_TOKEN" | sed -n '/ratchet-protocol:v[0-9]*:begin/,/ratchet-protocol:v[0-9]*:end/p')"
-stamp_protocol "$tmpt" "$TRACKER_FILE" "$VERIFY_CMD" "$STEP_TOKEN" "$DONE_TOKEN"
-extracted_block="$(sed -n '/ratchet-protocol:v[0-9]*:begin/,/ratchet-protocol:v[0-9]*:end/p' "$tmpt/AGENTS.md")"
-[ "$extracted_block" = "$expected" ] && ok "expected_protocol_block matches stamp_protocol output" \
-  || fail "expected_protocol_block != stamp_protocol (DRY violated)"
-
-rm -rf "$tmpt"
 
 # --- suite 20: bounded reap (T6.2) ---
 echo ""
@@ -1769,6 +1686,102 @@ if echo "$loop_refs" | grep -qE '\$RATCHET_LOOP|\$\{RATCHET_LOOP'; then
 else
   ok "RATCHET_LOOP: no variable read syntax (advisory-only constraint holds)"
 fi
+
+# =============================================================================
+# Suite 26: AGENTS.md is human-only, no loop protocol (T1.4)
+# =============================================================================
+echo "Suite 26: AGENTS.md human-only (T1.4)"
+
+# This repo's AGENTS.md must have NO ratchet-protocol markers
+if grep -q 'ratchet-protocol:' "$RR/AGENTS.md"; then
+  fail "AGENTS.md: found ratchet-protocol marker (should be human-only)"
+else
+  ok "AGENTS.md: no ratchet-protocol markers"
+fi
+
+# AGENTS.md must not mandate STEP_COMPLETE / one-turn semantics
+if grep -qi 'STEP_COMPLETE' "$RR/AGENTS.md"; then
+  fail "AGENTS.md: found STEP_COMPLETE mandate (loop protocol leaked)"
+else
+  ok "AGENTS.md: no STEP_COMPLETE mandate"
+fi
+
+# AGENTS.md must not tell the agent to do exactly one step as a standing rule
+if grep -qiE 'do (exactly )?one (discrete )?step|one turn at a time' "$RR/AGENTS.md"; then
+  fail "AGENTS.md: found one-step mandate (loop protocol leaked)"
+else
+  ok "AGENTS.md: no one-step standing mandate"
+fi
+
+# Agnosticism invariant verified in Suite 7 (no re-check needed)
+ok "AGENTS.md: agnosticism invariant verified in Suite 7"
+
+# =============================================================================
+# Suite 27: cmd_init migrates legacy loop blocks and seeds human AGENTS.md (T3.1)
+# =============================================================================
+echo "Suite 27: cmd_init AGENTS.md migration (T3.1)"
+
+# Test 1: migrate legacy block, preserve human prose
+testdir="$(mktemp -d)"
+mkdir -p "$testdir/.git"
+cat > "$testdir/AGENTS.md" <<'EOF'
+<!-- ratchet-protocol:v1:begin -->
+Old loop stuff
+<!-- ratchet-protocol:v1:end -->
+
+## My custom rules
+
+Do things this way.
+EOF
+(cd "$testdir" && source "$RR/lib/common.sh" && source "$RR/lib/commands.sh" && cmd_init "$testdir" >/dev/null 2>&1)
+if grep -q 'ratchet-protocol' "$testdir/AGENTS.md"; then
+  fail "cmd_init: legacy block not removed"
+else
+  ok "cmd_init: legacy block removed"
+fi
+if grep -q 'My custom rules' "$testdir/AGENTS.md" && grep -q 'Do things this way' "$testdir/AGENTS.md"; then
+  ok "cmd_init: human prose preserved"
+else
+  fail "cmd_init: human prose lost during migration"
+fi
+rm -rf "$testdir"
+
+# Test 2: seed human template when AGENTS.md absent
+testdir="$(mktemp -d)"
+mkdir -p "$testdir/.git"
+(cd "$testdir" && source "$RR/lib/common.sh" && source "$RR/lib/commands.sh" && cmd_init "$testdir" >/dev/null 2>&1)
+if [ -f "$testdir/AGENTS.md" ]; then
+  ok "cmd_init: AGENTS.md seeded when absent"
+else
+  fail "cmd_init: AGENTS.md not seeded"
+fi
+if [ -f "$testdir/AGENTS.md" ] && grep -q 'ratchet-protocol' "$testdir/AGENTS.md"; then
+  fail "cmd_init: seeded AGENTS.md has markers"
+else
+  ok "cmd_init: seeded AGENTS.md has no markers"
+fi
+rm -rf "$testdir"
+
+# Test 3: seed after stripping when markers were the only content
+testdir="$(mktemp -d)"
+mkdir -p "$testdir/.git"
+cat > "$testdir/AGENTS.md" <<'EOF'
+<!-- ratchet-protocol:v1:begin -->
+Old loop stuff
+<!-- ratchet-protocol:v1:end -->
+EOF
+(cd "$testdir" && source "$RR/lib/common.sh" && source "$RR/lib/commands.sh" && cmd_init "$testdir" >/dev/null 2>&1)
+if [ -f "$testdir/AGENTS.md" ] && grep -qE 'Loop vs interactive|What to read' "$testdir/AGENTS.md"; then
+  ok "cmd_init: seeded after stripping marker-only file"
+else
+  fail "cmd_init: did not seed after stripping marker-only file"
+fi
+if grep -q 'ratchet-protocol' "$testdir/AGENTS.md"; then
+  fail "cmd_init: markers remain after migration+seed"
+else
+  ok "cmd_init: no markers after migration+seed"
+fi
+rm -rf "$testdir"
 
 echo ""
 echo "selftest: $PASS passed, $FAIL failed"

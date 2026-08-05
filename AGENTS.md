@@ -1,43 +1,42 @@
-<!-- ratchet-protocol:v1:begin (managed by `ratchet init`; edit OUTSIDE the markers) -->
-## Autonomous loop protocol
+# Agent context
 
-You are driven one turn at a time by an outer loop (`ratchet`). Each turn you do
-exactly ONE discrete step of work, then hand control back.
+## Loop vs interactive
 
-1. Read `PLAN.md` and find the `[IN PROGRESS]` task; if none, take the
-   first `[ ]` (open) task. That is your work for this turn.
-2. If the verify command (`bash test/selftest.sh`) is currently RED, **fixing that red
-   gate IS your task this turn** — nothing else ships until the tree is green.
-3. Do ONE task only. Keep outputs in files; do not echo large content into your
-   reply.
-4. Read `LEARNINGS.md` before working; append any new gotcha you hit.
-5. When the step is complete: tick the finished task `[x]`, mark the next task
-   `[IN PROGRESS]`, and print the token `STEP_COMPLETE` on its own line.
-6. If there is absolutely no remaining open task, print the token `ALL_DONE` on its
-   own line instead.
-7. Do NOT run `git commit` / `git push` — the loop owns the commit and gates it
-   on green. Do NOT edit `.ratchet.conf` (the loop will reject the turn).
+The headless `ratchet` loop briefs its own turns via the harness prompt — it
+never sees this file. If you're working in a human-led session (`RATCHET_LOOP`
+is unset), work normally: make as many edits as needed, run the tests, commit
+when ready. The human owns the git history.
 
-Tracker grammar: status `[ ]` open · `[IN PROGRESS]` · `[x]` done, plus an
-optional id and optional tags `(trivial|normal|hard)` and/or `serial`. Example:
-`- [ ] T1.2 (normal, serial) design the schema`.
+## What this repo is
 
-## Fanout strategy (hard tasks only)
+Ratchet is a task-agnostic bash harness for autonomous loops. The engine in
+`lib/` and `bin/` holds ZERO project knowledge. The 4 contract files carry it:
+- **PLAN.md** (or configured tracker): the task roadmap
+- **LEARNINGS.md**: mistakes, gotchas, non-obvious behavior
+- **.ratchet.conf**: verify command, tokens, tier models
+- **AGENTS.md** (this file): human-facing guidance
 
-When `RATCHET_FANOUT != off` and your current task is tagged `(hard)`:
+This repo dogfoods itself: PLAN.md is the tracker, `bash test/selftest.sh` is
+the green gate.
 
-1. **Scout** (≤3 read-only subagents on `$RATCHET_SCOUT_MODELS`): spawn scouts to
-   map blast radius, find reuse patterns, and assess coverage. Scouts read only.
-2. **Implement**: YOU write the ONE implementation — subagents advise, you decide.
-3. **Review** (if `RATCHET_FANOUT=scout+review`, ≤2 advisory reviewers): spawn
-   reviewers to critique your implementation. Reviewers advise, YOU decide whether
-   to revise. The green gate (`bash test/selftest.sh`) is the only real gate.
+## How to work here
 
-**Subagents never run git commands** — only ratchet commits.
-<!-- ratchet-protocol:v1:end -->
+1. Run `ratchet selftest` (or `bash test/selftest.sh`) before marking work done.
+2. Add a selftest case with every non-trivial logic change.
+3. **Bash 3.2 only** — no assoc arrays, no `mapfile`, no `timeout`.
+4. **Agnosticism invariant**: lib/bin/templates contain ZERO project tool names
+   (`npm`/`pytest`/`cargo`/`rspec`/`go test`). Selftest greps for violations.
+5. **loop.log line formats are frozen** (additive only) — `stats`/`status` parse
+   them; never rename/reorder an emitted line.
+6. Read **LEARNINGS.md** before working — the repo's mistake ledger.
+7. Author plans via the `ratchet-plan` skill (skills/ratchet-plan/SKILL.md).
 
-## Project notes
+## Gotchas
 
-<!-- Add per-project rules, glossary, and conventions BELOW this line. Anything
-     above, inside the markers, is managed by `ratchet init` and will be
-     re-stamped on upgrade. -->
+- **Never edit `.ratchet.conf`** — the loop rejects turns that touch it.
+- **Never bold-wrap a task ID** in PLAN.md — the tracker parser breaks.
+- **Boolean shell functions return 0=hit** (success) — early-out must `return 1`.
+- **No new dependencies** for the loop core — `python3` is optional (stats only),
+  `jq` is optional (watch).
+- When confused about a contract file, run `ratchet doctor .` — it validates the
+  4 files and explains what's wrong.

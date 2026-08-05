@@ -155,7 +155,7 @@ because the harness is the only thing that injects them.
       constraints: test-only; if a real reader is ever needed later, this test
           is the intentional gate that must be consciously updated.
 
-- [IN PROGRESS] T1.4 (hard, serial) Rewrite this repo's AGENTS.md: human guidance only, no loop block.
+- [x] T1.4 (hard, serial) Rewrite this repo's AGENTS.md: human guidance only, no loop block.
       touches: AGENTS.md, test/selftest.sh
       do: Replace the entire `ratchet-protocol:v1` managed block (and its Fanout
           section) with human-facing guidance. Keep NO markers, NO one-turn
@@ -192,7 +192,7 @@ because the harness is the only thing that injects them.
 > The AGENTS.md protocol block no longer exists on disk, so the guard that
 > stopped an agent editing it is moot. Net deletion.
 
-- [ ] T2.1 (hard, serial) Remove conf_tampered and its commit-gate call.
+- [x] T2.1 (hard, serial) Remove conf_tampered and its commit-gate call.
       touches: lib/commit-gate.sh, test/selftest.sh
       do: Delete the `conf_tampered()` function (lib/commit-gate.sh:55-77) and
           its invocation in `commit_turn` (the `if conf_tampered; then … BLOCKED:
@@ -219,7 +219,7 @@ because the harness is the only thing that injects them.
       constraints: delete only AGENTS.md-tamper logic; .ratchet.conf unstaging
           and all non-tamper gate behavior byte-identical; bash 3.2.
 
-- [ ] T2.2 (normal, serial) Drop expected_protocol_block's stamping role; keep it as the prompt renderer.
+- [x] T2.2 (normal, serial) Drop expected_protocol_block's stamping role; keep it as the prompt renderer.
       touches: lib/commands.sh, test/selftest.sh
       do: `expected_protocol_block` (lib/commands.sh:29-35) is now used by ONE
           caller: the prompt injection in build_default_prompt (T1.1). Its old
@@ -251,7 +251,7 @@ because the harness is the only thing that injects them.
 > already-onboarded repos still carry a v1 loop-in-file block that must be
 > detected and removed, preserving human prose.
 
-- [ ] T3.1 (normal, serial) init seeds a human AGENTS.md body and strips any legacy loop block.
+- [x] T3.1 (normal, serial) init seeds a human AGENTS.md body and strips any legacy loop block.
       touches: lib/commands.sh, templates/AGENTS.human.md, test/selftest.sh
       do: Create `templates/AGENTS.human.md` — a task-agnostic seed for a target
           repo's human AGENTS.md (mirrors this repo's new AGENTS.md structure from
@@ -281,7 +281,7 @@ because the harness is the only thing that injects them.
       constraints: bash 3.2; migration edits ONLY inside-marker content; seed is
           task-agnostic (agnosticism grep green); no stamp/tamper machinery.
 
-- [ ] T3.2 (normal, serial) doctor detects a legacy loop-in-file block and reports delivery mode.
+- [IN PROGRESS] T3.2 (normal, serial) doctor detects a legacy loop-in-file block and reports delivery mode.
       touches: lib/commands.sh, test/selftest.sh
       do: Rewrite the doctor "protocol markers present + current in AGENTS.md"
           block (lib/commands.sh:476-489). New behavior: (a) if AGENTS.md contains
