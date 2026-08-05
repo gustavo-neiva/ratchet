@@ -459,16 +459,12 @@ cmd_doctor() {
     pr_fail "no .ratchet.conf (run: ratchet init $dir)"
   fi
 
-  # protocol markers (transitional: optional until T3.1 seeds human AGENTS.md)
+  # protocol delivery mode
   local agents="$dir/AGENTS.md"
-  if [ -f "$agents" ]; then
-    if grep -q 'ratchet-protocol:.*:begin' "$agents"; then
-      pr_ok "AGENTS.md: legacy protocol block found (migration in T3.1)"
-    else
-      pr_ok "AGENTS.md: no protocol markers (harness-prompt delivery)"
-    fi
+  if [ -f "$agents" ] && grep -q 'ratchet-protocol:.*:begin' "$agents"; then
+    pr_fail "AGENTS.md carries a legacy loop-in-file protocol block; run \`ratchet init $dir\` to migrate (loop protocol now travels in the harness prompt)"
   else
-    pr_ok "AGENTS.md: not yet seeded (created by T3.1)"
+    pr_ok "protocol delivery: harness-prompt (loop briefs its own turns)"
   fi
 
   # tracker exists, parses, has an open task

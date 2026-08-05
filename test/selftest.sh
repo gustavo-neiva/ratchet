@@ -1783,6 +1783,66 @@ else
 fi
 rm -rf "$testdir"
 
+# =============================================================================
+# Suite 28: doctor detects legacy loop-in-file block (T3.2)
+# =============================================================================
+echo "Suite 28: doctor protocol delivery check (T3.2)"
+
+# Test 1: doctor detects legacy block and fails with migration message
+testdir="$(mktemp -d)"
+mkdir -p "$testdir/.git"
+cat > "$testdir/.ratchet.conf" <<'EOF'
+TRACKER_FILE=PLAN.md
+VERIFY_CMD=true
+STEP_TOKEN=STEP_COMPLETE
+DONE_TOKEN=ALL_DONE
+EOF
+cat > "$testdir/PLAN.md" <<'EOF'
+- [ ] test task
+EOF
+cat > "$testdir/AGENTS.md" <<'EOF'
+<!-- ratchet-protocol:v1:begin -->
+Old loop stuff
+<!-- ratchet-protocol:v1:end -->
+EOF
+output="$(cd "$testdir" && source "$RR/lib/common.sh" && source "$RR/lib/commands.sh" && cmd_doctor "$testdir" 2>&1)" || true
+if printf '%s\n' "$output" | grep -q 'legacy loop-in-file protocol block'; then
+  ok "doctor detects legacy block and reports migration needed"
+else
+  fail "doctor did not detect legacy protocol block"
+fi
+if printf '%s\n' "$output" | grep -q 'ratchet init'; then
+  ok "doctor suggests 'ratchet init' migration"
+else
+  fail "doctor did not suggest migration command"
+fi
+rm -rf "$testdir"
+
+# Test 2: doctor reports harness-prompt delivery when no markers
+testdir="$(mktemp -d)"
+mkdir -p "$testdir/.git"
+cat > "$testdir/.ratchet.conf" <<'EOF'
+TRACKER_FILE=PLAN.md
+VERIFY_CMD=true
+STEP_TOKEN=STEP_COMPLETE
+DONE_TOKEN=ALL_DONE
+EOF
+cat > "$testdir/PLAN.md" <<'EOF'
+- [ ] test task
+EOF
+cat > "$testdir/AGENTS.md" <<'EOF'
+# Human guidance
+
+This is a clean AGENTS.md with no markers.
+EOF
+output="$(cd "$testdir" && source "$RR/lib/common.sh" && source "$RR/lib/commands.sh" && cmd_doctor "$testdir" 2>&1)" || true
+if printf '%s\n' "$output" | grep -q 'protocol delivery: harness-prompt'; then
+  ok "doctor reports harness-prompt delivery for clean AGENTS.md"
+else
+  fail "doctor did not report harness-prompt delivery"
+fi
+rm -rf "$testdir"
+
 echo ""
 echo "selftest: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

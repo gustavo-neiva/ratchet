@@ -9,7 +9,7 @@ Turn a goal into a `PLAN.md` the ratchet loop can execute **unattended and one t
 
 ## The one fact that shapes everything
 
-Ratchet turns are **ephemeral** — `--no-session --no-extensions`, ~90% cheaper. The agent starts each turn with **no memory of prior turns**. The only memory is the on-disk files: `PLAN.md`, `LEARNINGS.md`, `AGENTS.md`, and the code itself.
+Ratchet turns are **ephemeral** — `--no-session --no-extensions`, ~90% cheaper. The agent starts each turn with **no memory of prior turns**. The on-disk memory is the files: `PLAN.md`, `LEARNINGS.md`, and the code itself. `AGENTS.md` is **human/project memory** (what the repo is, how to work here, gotchas) — the loop protocol itself (one step, `STEP_COMPLETE`, green gate) does *not* live there; it is harness-injected fresh each turn from `$RATCHET_ROOT/templates`, so a memoryless turn receives its instructions in the prompt regardless of what `AGENTS.md` says.
 
 Therefore **every task must be self-contained**: name the files, name the functions, state the "why", and state how the loop knows it's done. A task that assumes context from a previous turn will fail, because there is no previous turn.
 

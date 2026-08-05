@@ -281,7 +281,7 @@ because the harness is the only thing that injects them.
       constraints: bash 3.2; migration edits ONLY inside-marker content; seed is
           task-agnostic (agnosticism grep green); no stamp/tamper machinery.
 
-- [IN PROGRESS] T3.2 (normal, serial) doctor detects a legacy loop-in-file block and reports delivery mode.
+- [x] T3.2 (normal, serial) doctor detects a legacy loop-in-file block and reports delivery mode.
       touches: lib/commands.sh, test/selftest.sh
       do: Rewrite the doctor "protocol markers present + current in AGENTS.md"
           block (lib/commands.sh:476-489). New behavior: (a) if AGENTS.md contains
@@ -309,7 +309,7 @@ because the harness is the only thing that injects them.
       constraints: bash 3.2; no re-introduction of stamp/tamper; keep every other
           doctor check (conf parse, tracker open, VERIFY_CMD dry-run) intact.
 
-- [ ] T3.3 (trivial) Document the loop-vs-interactive split and how it ports.
+- [IN PROGRESS] T3.3 (trivial) Document the loop-vs-interactive split and how it ports.
       touches: README.md, skills/ratchet-plan/SKILL.md
       do: README: add a short subsection (near "The repo contract (4 files)" or
           "How it works") explaining that loop protocol travels in the harness

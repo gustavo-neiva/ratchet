@@ -30,7 +30,7 @@ ratchet init /path/to/your/repo
 
 This stamps:
 - `.ratchet.conf` — the machine contract (parsed, never sourced; agent-forbidden)
-- `AGENTS.md` — agent protocol block (managed markers; edit outside them)
+- `AGENTS.md` — human/project entrypoint (no loop mechanics; the loop briefs its own turns — see below)
 - `PLAN.md` — tracker grammar (`[ ]` → `[IN PROGRESS]` → `[x]`)
 - `LEARNINGS.md` — append-only gotchas
 
@@ -152,9 +152,29 @@ The engine is task-agnostic. Your repo's contract files carry all project knowle
 | File | Role | Who writes it |
 |---|---|---|
 | `.ratchet.conf` | Machine contract — parsed, never sourced. Agent-forbidden. | Human (at `init`) |
-| `AGENTS.md` | Agent protocol — versioned/stamped markers + per-repo prose outside | `init` stamps; human adds project rules |
+| `AGENTS.md` | Human/project entrypoint — what the repo is, how to work here, gotchas (NO loop mechanics) | Human (`init` seeds a body); human owns it |
 | `PLAN.md` | Tracker — `[ ]`/`[IN PROGRESS]`/`[x]` + optional `trivial\|normal\|hard`, `serial` tags | Strong-model plan turn, human-reviewed |
 | `LEARNINGS.md` | Append-only gotchas the agent discovers | Agent (planner-pruned) |
+
+### Loop protocol vs interactive sessions
+
+The loop protocol (do one step, print `STEP_COMPLETE`, gate on green) **travels
+in the harness prompt** — it is injected fresh each turn from
+`$RATCHET_ROOT/templates`, never read from the repo. So **`AGENTS.md` is the
+human/interactive entrypoint only**: what the repo is, how to work here,
+gotchas. An interactive agent (you, in Claude/Pi/Cursor) loads `AGENTS.md` and
+sees **zero** one-turn/`STEP_COMPLETE`/"don't commit" instructions — work
+normally, make as many edits as needed, run the tests, you own the commits.
+
+The only in-loop signal exported to spawned turns is `RATCHET_LOOP=1`. It is
+**advisory** — routing/telemetry only, never a security or commit gate (a
+future turn that needs to read it as authority must consciously update the
+guard test first).
+
+**Migrating an older repo:** pre-split repos carry the protocol *inside*
+`AGENTS.md` under `ratchet-protocol:v1` markers. `ratchet init` strips that
+marker block (preserving all your prose outside it) and seeds a human body;
+`ratchet doctor` flags any leftover block and points at `ratchet init`.
 
 ### The four human checkpoints
 
