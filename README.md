@@ -203,6 +203,44 @@ Route turns by task complexity — heavy models for planning/building, cheap mod
 
 **Fallback semantics:** Any tier key unset → that tier falls back to the flat `MODELS` chain and global `THINKING`. Tag tasks in `PLAN.md` with `(trivial)`, `(normal)`, or `(hard)` to route them.
 
+#### Automatic selection (minimal config)
+
+You don't have to hand-write three tier chains. Set **one** line — `MODEL_RANK` —
+listing models strongest→weakest, and ratchet slices the plan/build/light tiers
+from it for any tier you leave unset:
+
+```ini
+# One line → ratchet derives all three tiers.
+# strongest first; ratchet picks the top as PLAN, bottom as LIGHT, middle as BUILD.
+MODEL_RANK="anthropic/claude-opus-4-8,anthropic/claude-sonnet-4-5,zai/glm-5.2,zai/glm-4.5-air"
+
+# Leave PLAN_MODELS/BUILD_MODELS/LIGHT_MODELS all unset → each is derived.
+# Set any of them to override just that tier; the rest still derive.
+```
+
+Where the inputs come from:
+
+- **Availability** — `pi --list-models`, auth-aware (24h cache). A model must
+  be authenticated *now* to land in a chain; a stale id is silently dropped.
+- **Cost / capability** — [models.dev](https://models.dev) (vendor-neutral,
+  no key, 24h cache, best-effort). Used only to order models you did *not* put
+  in `MODEL_RANK` (cheapest last) and to show `$in/$out` in `ratchet models
+  list`. A model with no models.dev join is never dropped — it just shows no
+  price.
+- **Your ranking** — `MODEL_RANK` is the one calibration knob. No free API
+  ranks coding skill (price isn't a proxy: a pricier model can be
+  creative-writing-only), so the human ordering is the skill signal.
+
+**Override precedence (unchanged):** an explicit tier key always wins, then the
+flat `MODELS` chain, then the `MODEL_RANK` derivation, then (only with nothing
+set) the existing "no models configured" guard. Every repo with a `MODELS=` line
+keeps behaving exactly as before.
+
+**Honest caveat:** ratchet only automates availability, cost display, and
+slicing tiers from your order — it does not *judge* which model is best at a
+task. A wrong auto-pick strikes on the verify gate and falls through the normal
+cascade, so a bad guess costs one turn, never a bad commit.
+
 **Example `.ratchet.conf`:**
 
 ```ini

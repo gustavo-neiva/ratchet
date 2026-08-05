@@ -610,7 +610,7 @@ next round.
       constraints: no parser/grammar change; the human review checkpoint is
           preserved (never auto-run); prose/prompt change only.
 
-- [IN PROGRESS] T7.6 (trivial) Document automatic model selection.
+- [x] T7.6 (trivial) Document automatic model selection.
       touches: README.md
       do: In the model-routing section, add a subsection: "Automatic selection
           (minimal config)". Explain: availability comes from `pi --list-models`;
