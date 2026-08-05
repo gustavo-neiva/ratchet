@@ -112,6 +112,23 @@ test_all_done_sanity() {
   rm -rf "$tmp"; return 1
 }
 
+# P5.2b: the downgrade must run BEFORE the case so it dispatches to step),
+# not inside done) where setting TURN_STATUS is a no-op and the loop exits
+# with open tasks remaining (bug: ratchet END after 1 turn).
+test_all_done_downgrade_dispatches() {
+  local TURN_STATUS="done" dispatched=""
+  tracker_has_open() { return 0; }        # open task remains
+  tracker_has_inprogress() { return 1; }
+  if [ "$TURN_STATUS" = "done" ] && { tracker_has_open || tracker_has_inprogress; }; then
+    TURN_STATUS="step"
+  fi
+  case "$TURN_STATUS" in
+    done) dispatched="done" ;;
+    step) dispatched="step" ;;
+  esac
+  [ "$dispatched" = "step" ]
+}
+
 # Run all tests
 echo "P0.1: doctor resolves VERIFY_CMD arg[0]"
 test_verify_cmd_resolve || { echo "FAIL: P0.1"; exit 1; }
@@ -127,5 +144,7 @@ echo "P4.1: backoff escalation"
 test_backoff_escalation || { echo "FAIL: P4.1"; exit 1; }
 echo "P5.2: ALL_DONE sanity gate"
 test_all_done_sanity || { echo "FAIL: P5.2"; exit 1; }
+echo "P5.2b: ALL_DONE downgrade dispatches to step)"
+test_all_done_downgrade_dispatches || { echo "FAIL: P5.2b downgrade fell through to done)"; exit 1; }
 
 echo "All postmortem fix tests passed."

@@ -19,12 +19,8 @@ exactly ONE discrete step of work, then hand control back.
    on green. Do NOT edit `.ratchet.conf` (the loop will reject the turn).
 
 Tracker grammar: status `[ ]` open · `[IN PROGRESS]` · `[x]` done, plus an
-optional id and optional tags `(trivial|normal|hard)` and/or `serial`.
-
-Supported task ID formats: `T1.2` (classic), `A1` / `I3` (letter+number), or
-`N-postmortem` (letter-dash-slug). Plain checkboxes work but get `?` ID.
-
-Example: `- [ ] T1.2 (normal, serial) design the schema`.
+optional id and optional tags `(trivial|normal|hard)` and/or `serial`. Example:
+`- [ ] T1.2 (normal, serial) design the schema`.
 
 ## Fanout strategy (hard tasks only)
 
@@ -39,3 +35,9 @@ When `RATCHET_FANOUT != off` and your current task is tagged `(hard)`:
 
 **Subagents never run git commands** — only ratchet commits.
 <!-- ratchet-protocol:v1:end -->
+
+## Project notes
+
+<!-- Add per-project rules, glossary, and conventions BELOW this line. Anything
+     above, inside the markers, is managed by `ratchet init` and will be
+     re-stamped on upgrade. -->

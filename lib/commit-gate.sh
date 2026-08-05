@@ -63,6 +63,13 @@ conf_tampered() {
   head_block=$(git show HEAD:AGENTS.md 2>/dev/null | sed -n "/$ext/,/$end/p")
   staged_block=$(git show :AGENTS.md 2>/dev/null | sed -n "/$ext/,/$end/p")
   [ "$head_block" = "$staged_block" ] && return 1
+  
+  # Benign re-stamp guard: if staged != HEAD but staged == expected block from
+  # live conf, it's a legitimate `ratchet init` re-stamp, not tampering.
+  local expected_block
+  expected_block="$(expected_protocol_block "${TRACKER_FILE:-PLAN.md}" "${VERIFY_CMD:-}" "${STEP_TOKEN:-STEP_COMPLETE}" "${DONE_TOKEN:-ALL_DONE}" | sed -n "/$ext/,/$end/p")"
+  [ "$staged_block" = "$expected_block" ] && return 1
+  
   return 0
 }
 

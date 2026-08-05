@@ -372,14 +372,18 @@ $(cat "$LOG_DIR/last_turn.note")"
     
     show_excerpt
 
+    # sanity-gate: an agent that prints ALL_DONE while tasks remain is mid-work,
+    # not done. Downgrade BEFORE the case so it dispatches to step) — setting
+    # TURN_STATUS inside done) is a no-op (case won't re-dispatch) and the loop
+    # falls through to the completion tail and exits with open tasks remaining.
+    if [ "$TURN_STATUS" = "done" ] && { tracker_has_open || tracker_has_inprogress; }; then
+      emit "agent printed $DONE_TOKEN but open tasks remain — treating as step and continuing."
+      TURN_STATUS="step"
+    fi
+
     case "$TURN_STATUS" in
       done)
-        # sanity-gate: verify no open tasks remain
-        if tracker_has_open || tracker_has_inprogress; then
-          emit "agent printed $DONE_TOKEN but open tasks remain — treating as step and continuing."
-          TURN_STATUS="step"
-        fi
-        if [ "$TURN_STATUS" = "done" ] && ! commit_turn "$turn" "$model"; then
+        if ! commit_turn "$turn" "$model"; then
           done_gate_fails=$((done_gate_fails+1))
           emit "DONE turn was RED at commit gate — treating as repair-needed, not complete (${done_gate_fails}/${MAX_DONE_GATE_FAILS})."
           [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }

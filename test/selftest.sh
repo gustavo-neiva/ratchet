@@ -1192,6 +1192,76 @@ PATH="$tmpp:$PATH" "$RATCHET" models add zai/glm-5.2 --repo -d "$tmpm" >/dev/nul
 
 rm -rf "$tmpp" "$tmpm"
 
+# --- suite 19: protocol block tamper guard (expected_protocol_block + conf_tampered) ---
+echo "== suite 19: protocol block tamper guard (T6.1) =="
+
+# Create a fixture repo to test protocol block stamping and tamper detection
+tmpt="$(mktemp -d)"
+trap "rm -rf '$tmpt'" EXIT
+git -C "$tmpt" init -q
+mkdir -p "$tmpt/.ratchet"
+
+# Set up conf values for testing
+TRACKER_FILE="PLAN.md"
+VERIFY_CMD="bin/test"
+STEP_TOKEN="STEP_COMPLETE"
+DONE_TOKEN="ALL_DONE"
+
+# Test 1: expected_protocol_block generates block with substitutions
+expected_block="$(expected_protocol_block "$TRACKER_FILE" "$VERIFY_CMD" "$STEP_TOKEN" "$DONE_TOKEN")"
+printf '%s' "$expected_block" | grep -q 'PLAN.md' && printf '%s' "$expected_block" | grep -q 'bin/test' \
+  && ok "expected_protocol_block substitutes config values" || fail "expected_protocol_block substitution"
+
+# Test 2: stamp_protocol creates AGENTS.md with the expected block
+stamp_protocol "$tmpt" "$TRACKER_FILE" "$VERIFY_CMD" "$STEP_TOKEN" "$DONE_TOKEN"
+[ -f "$tmpt/AGENTS.md" ] && grep -q 'ratchet-protocol:v1:begin' "$tmpt/AGENTS.md" \
+  && ok "stamp_protocol creates AGENTS.md with markers" || fail "stamp_protocol create"
+
+# Test 3: stamp_protocol is idempotent (no-op on same config)
+cp "$tmpt/AGENTS.md" "$tmpt/AGENTS.md.before"
+stamp_protocol "$tmpt" "$TRACKER_FILE" "$VERIFY_CMD" "$STEP_TOKEN" "$DONE_TOKEN"
+diff -q "$tmpt/AGENTS.md" "$tmpt/AGENTS.md.before" >/dev/null 2>&1 \
+  && ok "stamp_protocol is idempotent (no-op on same config)" || fail "stamp_protocol idempotent"
+
+# Test 4: commit AGENTS.md and set up git staging for tamper tests
+git -C "$tmpt" add AGENTS.md
+git -C "$tmpt" commit -q -m "initial AGENTS.md"
+
+# Test 5: conf_tampered returns false (not tampered) when nothing is staged
+cd "$tmpt" || exit 1
+conf_tampered && fail "conf_tampered false-positive on clean tree" || ok "conf_tampered clean tree"
+
+# Test 6: conf_tampered returns false when AGENTS.md is staged but matches HEAD
+git add AGENTS.md  # no actual change
+conf_tampered && fail "conf_tampered false-positive on unchanged staged file" || ok "conf_tampered unchanged staged"
+
+# Test 7: benign re-stamp (VERIFY_CMD changed) -> staged block = expected -> NOT tampered
+VERIFY_CMD="bin/new-test"
+stamp_protocol "$tmpt" "$TRACKER_FILE" "$VERIFY_CMD" "$STEP_TOKEN" "$DONE_TOKEN"
+git add AGENTS.md
+conf_tampered && fail "conf_tampered should allow benign re-stamp" || ok "conf_tampered allows benign re-stamp"
+cd - >/dev/null
+
+# Test 8: real tampering (agent rewrites block to arbitrary text) -> IS tampered
+git -C "$tmpt" reset -q HEAD AGENTS.md  # unstage the benign re-stamp
+git -C "$tmpt" checkout -- AGENTS.md      # restore HEAD version
+cd "$tmpt" || exit 1
+# Simulate agent tampering: rewrite protocol block to garbage
+sed -i.bak 's/ratchet-protocol:v1:begin/TAMPERED-MARKER/g' AGENTS.md
+git add AGENTS.md
+conf_tampered && ok "conf_tampered detects real tampering" || fail "conf_tampered should detect tampering"
+cd - >/dev/null
+
+# Test 9: expected_protocol_block equality with stamp_protocol output
+VERIFY_CMD="bin/test"
+expected="$(expected_protocol_block "$TRACKER_FILE" "$VERIFY_CMD" "$STEP_TOKEN" "$DONE_TOKEN" | sed -n '/ratchet-protocol:v[0-9]*:begin/,/ratchet-protocol:v[0-9]*:end/p')"
+stamp_protocol "$tmpt" "$TRACKER_FILE" "$VERIFY_CMD" "$STEP_TOKEN" "$DONE_TOKEN"
+extracted_block="$(sed -n '/ratchet-protocol:v[0-9]*:begin/,/ratchet-protocol:v[0-9]*:end/p' "$tmpt/AGENTS.md")"
+[ "$extracted_block" = "$expected" ] && ok "expected_protocol_block matches stamp_protocol output" \
+  || fail "expected_protocol_block != stamp_protocol (DRY violated)"
+
+rm -rf "$tmpt"
+
 rm -rf "$RATCHET_HOME"   # isolated test home (see top of file)
 
 echo ""

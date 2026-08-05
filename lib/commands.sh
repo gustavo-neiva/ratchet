@@ -24,16 +24,33 @@ detect_verify_cmd() {
   else printf ''; fi
 }
 
+# expected_protocol_block TRACKER VERIFY STEP DONE -> render the protocol block
+# with live conf values. Shared by stamp_protocol (write) and conf_tampered (check).
+expected_protocol_block() {
+  local tr="$1" vc="$2" st="$3" dt="$4" tpl
+  tpl="$RATCHET_ROOT/templates/AGENTS.protocol.md"
+  [ -f "$tpl" ] || die "template missing: $tpl"
+  sed -e "s|{{TRACKER_FILE}}|$tr|g" -e "s|{{VERIFY_CMD}}|$vc|g" \
+      -e "s|{{STEP_TOKEN}}|$st|g" -e "s|{{DONE_TOKEN}}|$dt|g" "$tpl"
+}
+
 # stamp_protocol DIR TRACKER VERIFY STEP DONE -> write the managed marker block
 # into AGENTS.md (insert if absent, re-stamp if an older block exists).
 stamp_protocol() {
-  local dir="$1" tr="$2" vc="$3" st="$4" dt="$5" agents="$dir/AGENTS.md" tpl
-  tpl="$RATCHET_ROOT/templates/AGENTS.protocol.md"
-  [ -f "$tpl" ] || die "template missing: $tpl"
+  local dir="$1" tr="$2" vc="$3" st="$4" dt="$5"
+  local agents="$dir/AGENTS.md"
   local block
-  block="$(sed -e "s|{{TRACKER_FILE}}|$tr|g" -e "s|{{VERIFY_CMD}}|$vc|g" \
-               -e "s|{{STEP_TOKEN}}|$st|g" -e "s|{{DONE_TOKEN}}|$dt|g" "$tpl")"
+  block="$(expected_protocol_block "$tr" "$vc" "$st" "$dt")"
+  
+  # Idempotent: skip rewrite if existing block already matches
   if [ -f "$agents" ] && grep -q 'ratchet-protocol:.*:begin' "$agents"; then
+    local ext='ratchet-protocol:v[0-9]*:begin' end='ratchet-protocol:v[0-9]*:end'
+    local existing_block expected_block_part
+    existing_block=$(sed -n "/$ext/,/$end/p" "$agents")
+    expected_block_part=$(printf '%s' "$block" | sed -n "/$ext/,/$end/p")
+    if [ "$existing_block" = "$expected_block_part" ]; then
+      return 0  # already stamped with this exact block
+    fi
     # re-stamp: replace from begin..end with the fresh block (preserves prose outside)
     local tmp blockf; tmp=$(mktemp); blockf=$(mktemp)
     printf '%s\n' "$block" > "$blockf"
