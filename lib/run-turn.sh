@@ -53,6 +53,9 @@ run_turn() {
   local thinking_args=()
   [ -n "$THINKING" ] && thinking_args=(--thinking "$THINKING")
 
+  # advisory only — routing/telemetry, never a gate
+  export RATCHET_LOOP=1
+
   # Extensions ALWAYS load: the Anthropic OAuth-auth extension is itself an
   # extension, so --no-extensions makes plan-auth requests bill as third-party
   # "extra usage" and hard-error (HTTP 400). FANOUT does NOT toggle extensions

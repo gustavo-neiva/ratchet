@@ -16,3 +16,7 @@
 [2026-08-05 01:35:22]   commit gate RED — NOT committing; leaving work for next turn to repair.  # 2026-08-05T04:35:22Z
 
 [baseline] loop/human split baseline: selftest 207/207 green (anchoring additive, zero-regression invariant for M2 deletions)
+## auto-captured
+[2026-08-05 11:51:32]   commit gate RED — NOT committing; leaving work for next turn to repair.  # 2026-08-05T14:51:33Z
+## auto-captured
+[2026-08-05 11:52:36]   commit gate RED — NOT committing; leaving work for next turn to repair.  # 2026-08-05T14:52:36Z

@@ -1146,6 +1146,35 @@ else
 fi
 rm -rf "$tmpf3"
 
+# Test (d): RATCHET_LOOP=1 exported unconditionally (unlike FANOUT)
+tmpf4="$(mktemp -d)"
+cat > "$tmpf4/PLAN.md" <<'EOF'
+# Test plan
+- [ ] T1 (trivial) simple task
+EOF
+cat > "$tmpf4/verify.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$tmpf4/verify.sh"
+cat > "$tmpf4/.ratchet.conf" <<'EOF'
+RATCHET_PROTOCOL=1
+TRACKER_FILE=PLAN.md
+VERIFY_CMD=./verify.sh
+EOF
+"$RATCHET" init "$tmpf4" >/dev/null 2>&1
+git -C "$tmpf4" init -q
+git -C "$tmpf4" add -A
+git -C "$tmpf4" commit -q -m "baseline"
+
+"$RATCHET" once "$tmpf4" -v -m fake/model --agent-cmd "$FAKE" >"$tmpf4/run.log" 2>&1
+if grep -q 'RATCHET_LOOP=1' "$tmpf4/run.log"; then
+  ok "RATCHET_LOOP=1 exported unconditionally (advisory loop signal)"
+else
+  fail "RATCHET_LOOP=1 not exported (see $tmpf4/run.log)"
+fi
+rm -rf "$tmpf4"
+
 echo ""
 echo "== suite 18: ratchet models (chain ops, conf upsert, registry, cmd) =="
 
@@ -1697,6 +1726,48 @@ if echo "$fallback_prompt" | grep -q "ALL_DONE"; then
   ok "build_default_prompt fallback: contains ALL_DONE token"
 else
   fail "build_default_prompt fallback: missing ALL_DONE token"
+fi
+
+# =============================================================================
+# Suite 25: RATCHET_LOOP is never used as authority (T1.3)
+# =============================================================================
+echo "Suite 25: RATCHET_LOOP advisory-only invariant (T1.3)"
+
+# Grep lib/ and bin/ for any reference to RATCHET_LOOP and assert the ONLY
+# occurrence is the export write in run-turn.sh. No if/case/[ branch may
+# read it to gate commits, skip checks, or grant power (constraint 3).
+
+loop_refs="$(grep -rn 'RATCHET_LOOP' "$RR/lib" "$RR/bin" 2>/dev/null || true)"
+
+# Should contain exactly one line: the export in run-turn.sh
+ref_count="$(echo "$loop_refs" | grep -c . || true)"
+
+if [ "$ref_count" -eq 1 ]; then
+  ok "RATCHET_LOOP: exactly one reference found"
+else
+  fail "RATCHET_LOOP: expected 1 reference, found $ref_count"
+fi
+
+# Verify it's the export statement, not a conditional read
+if echo "$loop_refs" | grep -q 'export RATCHET_LOOP=1'; then
+  ok "RATCHET_LOOP: reference is the export statement"
+else
+  fail "RATCHET_LOOP: reference is not the export statement"
+fi
+
+# Verify it's in run-turn.sh
+if echo "$loop_refs" | grep -q 'lib/run-turn.sh'; then
+  ok "RATCHET_LOOP: export is in lib/run-turn.sh"
+else
+  fail "RATCHET_LOOP: export is not in lib/run-turn.sh"
+fi
+
+# Assert no conditional usage: no if/case/[ that would use it as authority
+# Check for variable expansion patterns that would indicate reading the value
+if echo "$loop_refs" | grep -qE '\$RATCHET_LOOP|\$\{RATCHET_LOOP'; then
+  fail "RATCHET_LOOP: found variable read syntax (violates advisory-only constraint)"
+else
+  ok "RATCHET_LOOP: no variable read syntax (advisory-only constraint holds)"
 fi
 
 echo ""

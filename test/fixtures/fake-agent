@@ -22,6 +22,7 @@ PLAN="${TRACKER_FILE:-PLAN.md}"
 # (the work does not depend on the prompt — it is deterministic per the tracker)
 
 # Echo FANOUT env vars if set (for selftest verification)
+[ -n "${RATCHET_LOOP:-}" ] && echo "RATCHET_LOOP=$RATCHET_LOOP" >&2
 [ -n "${RATCHET_FANOUT:-}" ] && echo "RATCHET_FANOUT=$RATCHET_FANOUT" >&2
 [ -n "${RATCHET_SCOUT_MODELS:-}" ] && echo "RATCHET_SCOUT_MODELS=$RATCHET_SCOUT_MODELS" >&2
 

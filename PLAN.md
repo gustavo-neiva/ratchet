@@ -118,7 +118,7 @@ because the harness is the only thing that injects them.
       constraints: bash 3.2; best-effort render, never die; template read from
           $RATCHET_ROOT only; keep the .ratchet.conf-forbidden line.
 
-- [IN PROGRESS] T1.2 (normal, serial) Export RATCHET_LOOP=1 as the advisory loop signal.
+- [x] T1.2 (normal, serial) Export RATCHET_LOOP=1 as the advisory loop signal.
       touches: lib/run-turn.sh, test/selftest.sh
       do: In run-turn.sh, right before the block that conditionally exports
           RATCHET_FANOUT (currently lib/run-turn.sh:62-65, inside run_turn, just
@@ -138,7 +138,7 @@ because the harness is the only thing that injects them.
       constraints: bash 3.2; unconditional export; advisory-only (add nothing
           that READS it as authority).
 
-- [ ] T1.3 (normal, serial) Assert RATCHET_LOOP is never used as authority.
+- [x] T1.3 (normal, serial) Assert RATCHET_LOOP is never used as authority.
       touches: test/selftest.sh
       do: Add a guard test proving constraint 3 holds: grep lib/ and bin/ for any
           read of RATCHET_LOOP (`$RATCHET_LOOP`, `${RATCHET_LOOP`) and assert the
@@ -155,7 +155,7 @@ because the harness is the only thing that injects them.
       constraints: test-only; if a real reader is ever needed later, this test
           is the intentional gate that must be consciously updated.
 
-- [ ] T1.4 (hard, serial) Rewrite this repo's AGENTS.md: human guidance only, no loop block.
+- [IN PROGRESS] T1.4 (hard, serial) Rewrite this repo's AGENTS.md: human guidance only, no loop block.
       touches: AGENTS.md, test/selftest.sh
       do: Replace the entire `ratchet-protocol:v1` managed block (and its Fanout
           section) with human-facing guidance. Keep NO markers, NO one-turn
