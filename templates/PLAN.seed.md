@@ -14,6 +14,10 @@
 > each task must be self-contained: name the files, the "why", and how to verify.
 > Author with the `ratchet-plan` skill. See the ratchet repo's own PLAN.md for a
 > worked example of the task schema below.
+>
+> Size each milestone as ONE reviewable unit (a feature/subfeature a human can
+> read as a single PR, target ≤~400 changed lines) — milestones are the
+> review/PR boundary, not just headings.
 
 ## Design constraints (read before ANY task — non-negotiable)
 1. _(e.g. zero regressions; the verify gate stays green every turn)_

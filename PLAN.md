@@ -1,355 +1,377 @@
-# PLAN.md — ratchet: separate loop-driven from human-driven agent context
+# PLAN.md — ratchet: fully autonomous loop, human at PR-merge only
 
-> The prior plan (UI overhaul, loop-analysis, automatic model selection) is
-> COMPLETE and preserved in git history. This plan fixes a dogfood design bug:
-> the ratchet loop protocol currently lives inside `AGENTS.md`, which EVERY
-> interactive agent (Claude, Pi, Cursor) auto-loads — so a human-led session
-> reads one-turn/`STEP_COMPLETE`/"don't commit" instructions meant only for the
-> headless loop, and mis-behaves. Run with `bin/ratchet run .`.
+> Supersedes UPGRADE_DRAFT.md (validated 2026-02: pi 0.81.1 flags OK, subagent
+> tool live in headless turns, gh 2.4.0 `--base`/`--json` OK, selftest 223/223,
+> models.dev join OK). Pivot: the ONLY human touchpoint is merging a PR.
+> Plan review = PR #0. Code review = one PR per milestone, no stacking — the
+> loop blocks on merge (trilemma: sequential work + small PRs + no stacking
+> forces a merge-gate; the wait IS the human-in-the-loop).
 
-Tracker grammar: `[ ]` open → `[IN PROGRESS]` → `[x]` done.
-Tags: `(trivial|normal|hard)` and `(serial)`.
-
-## The decision (B2-minus — read before ANY task)
-
-Loop mechanics move OUT of the shared `AGENTS.md` entrypoint and INTO the
-harness-injected per-turn prompt. This makes the separation **structural, not
-advisory**: an interactive agent literally never receives loop instructions,
-because the harness is the only thing that injects them.
-
-- **`AGENTS.md` becomes fully human-owned** — what the repo is, how to work
-  here, gotchas. NO managed loop-protocol block, NO markers.
-- **The loop protocol travels in the prompt**, rendered fresh each turn from
-  `templates/AGENTS.protocol.md` (repurposed as the prompt source) via
-  `expected_protocol_block`, with live conf values.
-- **`RATCHET_LOOP=1`** is exported by `run-turn.sh` as an ADVISORY signal (for
-  tools/subagents/telemetry). It is spoofable, so it is NEVER a security or
-  commit gate — the prompt channel is the only real guarantee.
-- Because the AGENTS.md protocol block disappears, the `conf_tampered` guard,
-  its doctor marker-checks, and suite-19 tamper tests are DELETED — a net
-  simplification. (`.ratchet.conf` tamper protection is separate and STAYS.)
+Tracker grammar: [ ] open → [IN PROGRESS] → [x] done. Tags: (trivial|normal|hard) and (serial).
 
 ## Design constraints (read before ANY task — non-negotiable)
+1. Additive only. The 223-case selftest baseline never regresses. Frozen
+   loop.log line grammar: new lines may be ADDED, existing lines never change.
+2. Bash 3.2, zero new dependencies. `gh` is used only when the PR flow is on.
+3. Backward compatible: all new behavior is off unless `PR_CADENCE=milestone`
+   is set. Default `PR_CADENCE=done` = today's behavior, byte-identical.
+4. The green gate (`commit_turn`) stays the ONLY commit authority. Review and
+   plan turns never write code; the review turn is read-only by prompt.
+5. No hardcoded model ids anywhere in ratchet source or templates.
+6. The loop never merges. `gh pr merge` must not appear in any code path.
+7. One task per turn. Do the task, add its verify case, run VERIFY_CMD, mark
+   [x], print STEP_COMPLETE.
 
-1. **Prompt source is read-only relative to the repo.** The per-turn prompt is
-   ALWAYS built from `$RATCHET_ROOT/templates`, NEVER from any file under
-   `$REPO_DIR`. A loop turn must not be able to plant a prompt-override the
-   harness would trust.
-2. **Never `die` in the per-turn prompt build.** If the protocol template is
-   missing or fails to render, `build_default_prompt` falls back to today's
-   inline string. The hot path must not hard-fail mid-run.
-3. **`RATCHET_LOOP` is advisory only.** No security branch, no commit gate, no
-   tamper check may read it to grant power. Routing/telemetry only.
-4. **loop.log line formats are frozen (additive only).** `stats`/`status` parse
-   them; never rename/reorder an emitted line.
-5. **Bash 3.2; zero new deps for the loop core.** No assoc arrays, no `mapfile`,
-   no `timeout`. `python3` optional (stats), `jq` optional (watch).
-6. **Agnosticism invariant holds.** No project tool names (`npm`/`pytest`/
-   `cargo`/`rspec`/`go test`) in `lib/`, `bin/`, `templates/`. Selftest greps.
-7. **One task per turn.** Do the task, add its selftest case, run
-   `bash test/selftest.sh`, mark `[x]`, print STEP_COMPLETE.
-8. Never edit `.ratchet.conf`. Discovered gotchas → LEARNINGS.md (append-only).
+VERIFY_CMD: bash test/selftest.sh
 
-## Milestone 0 — safety net (serial)
+## Milestone 1 — review tier + contract keys (config plumbing)
+> Everything later hangs off these keys. Pure plumbing, mirrors the plan tier.
 
-- [x] T0.1 (trivial, serial) Baseline: confirm the suite is green and record the count.
-      touches: LEARNINGS.md
-      do: Run `bash test/selftest.sh`. Confirm it exits 0. Append one line to
-          LEARNINGS.md recording the pass count (e.g. "loop/human split baseline:
-          selftest N/N green"). Change no other file. This anchors the "additive,
-          zero-regression" invariant for the deletions in M2.
+- [ ] T1.1 (normal) add the `review` tier to model routing
+      touches: lib/model-fallback.sh, lib/common.sh
+      do: Mirror the existing plan tier exactly. In `chain_for_tier`, add a
+          `review` case returning `$REVIEW_MODELS` (fallback: flat MODELS, then
+          suggest_chain). In `thinking_for_tier`, add `review` returning
+          `$THINKING_REVIEW` (fallback: $THINKING). Declare REVIEW_MODELS=""
+          and THINKING_REVIEW="" defaults in lib/common.sh next to the other
+          tier keys.
       accept:
-          Given a clean checkout
-          When `bash test/selftest.sh` runs
-          Then it exits 0 and LEARNINGS.md records the count
-      verify: bash test/selftest.sh
-      constraints: no code changes this turn.
+          Given REVIEW_MODELS=zai/glm-5.2 and THINKING_REVIEW=medium
+          When chain_for_tier review / thinking_for_tier review run
+          Then they echo zai/glm-5.2 and medium
+          Given both are unset
+          Then they fall back to MODELS / THINKING exactly like the plan tier
+      verify: bash test/selftest.sh   (add cases: review tier set, unset≡flat)
+      constraints: additive; do not touch plan/build/light arms.
 
-## Milestone 1 — Slice 1: the split works in THIS repo (serial: shared prompt/template/AGENTS path)
+- [ ] T1.2 (trivial) allowlist the new contract keys
+      touches: lib/contract.sh, templates/ratchet.conf.example
+      do: Append to CONTRACT_KEYS: REVIEW_MODELS THINKING_REVIEW MODEL_RANK
+          MAX_REVIEW_CYCLES PR_CADENCE MERGE_POLL_SECS MERGE_WAIT_TIMEOUT
+          PR_SOFT_MAX_LINES. NOTIFY_CMD is deliberately NOT allowlisted: it is
+          an executable command string, so it may live only in the trusted
+          global conf (sourced) — a repo .ratchet.conf setting it already
+          fails loudly as an unknown key, which is exactly the wanted
+          behavior. (MODEL_RANK exists in common.sh but was
+          never allowlisted — a per-repo .ratchet.conf setting it is silently a
+          doctor error today; this fixes that gap.) Add numeric validation for
+          MAX_REVIEW_CYCLES, MERGE_POLL_SECS, MERGE_WAIT_TIMEOUT,
+          PR_SOFT_MAX_LINES in the numeric-keys case arm. Document each new key
+          with a commented example in ratchet.conf.example.
+      accept:
+          Given a .ratchet.conf containing MODEL_RANK=x and PR_CADENCE=milestone
+          When parse_repo_conf runs
+          Then it returns 0 with no "unknown key" errors
+      verify: bash test/selftest.sh   (add case: new keys parse, junk value in
+          MERGE_POLL_SECS is stripped to digits)
+      constraints: allowlist parser semantics unchanged; never source the conf.
 
-> Priority slice. After M1 an interactive agent in this repo sees only human
-> guidance, and a loop turn carries its protocol in the prompt. Porting to other
-> repos is M3 — deliberately deferred so we feel the edges first (Product + DA).
+- [ ] T1.3 (normal) defaults + `--pr-cadence` flag wiring
+      touches: lib/common.sh, bin/ratchet
+      do: Defaults in common.sh: PR_CADENCE=done, MAX_REVIEW_CYCLES=2,
+          MERGE_POLL_SECS=300, MERGE_WAIT_TIMEOUT=259200 (72h), NOTIFY_CMD="",
+          PR_SOFT_MAX_LINES=400. Add `--pr-cadence milestone|done` to
+          parse_args + pre_scan skip list + usage text. PR_CADENCE=milestone
+          implies OPEN_PR=1 PUSH_ON_DONE=1 (set after parse_args in main).
+      accept:
+          Given no new conf keys and no new flags
+          When ratchet runs
+          Then behavior is byte-identical to today (PR_CADENCE=done)
+      verify: bash test/selftest.sh   (add case: default cadence is done;
+          --pr-cadence milestone sets OPEN_PR=1)
+      constraints: additive; existing flags untouched.
 
-- [x] T1.1 (hard, serial) Inject the rendered loop protocol into the per-turn prompt.
-      touches: lib/common.sh, test/selftest.sh
-      do: Today `build_default_prompt` (lib/common.sh:119-121) emits a generic
-          "Do ONE discrete step … following the project's AGENTS.md instructions"
-          string — it DELEGATES the protocol to AGENTS.md. Change it so the loop
-          carries its OWN protocol: render `templates/AGENTS.protocol.md` via
-          `expected_protocol_block "$TRACKER_FILE" "$VERIFY_CMD" "$STEP_TOKEN"
-          "$DONE_TOKEN"` and embed it in the prompt, THEN keep a short trailer
-          telling the agent to read AGENTS.md + LEARNINGS.md for PROJECT facts
-          (not protocol). Two hard rules: (a) the render is best-effort — wrap it
-          so a missing/failed template FALLS BACK to today's exact inline string
-          (constraint 2, never `die`); (b) the template path is under
-          `$RATCHET_ROOT` only (constraint 1). Note `expected_protocol_block`
-          lives in commands.sh, which is sourced by bin/ratchet — call it if
-          available, else fall back. Drop the "following the project's AGENTS.md
-          instructions" clause (the protocol is now inline) but KEEP the
-          "Do NOT edit .ratchet.conf" line.
+## Milestone 2 — generalized model ranking (derived rank, no hardcoding)
+> "Auto model choosing" that works for any user, any provider, any catalog.
+> Rank = output price descending from models.dev, availability from pi.
+
+- [ ] T2.1 (hard) derived_rank: price-ordered ranking when MODEL_RANK is unset
+      touches: lib/model-select.sh
+      do: Add `derived_rank()`: read pi_model_registry (availability ground
+          truth, ALLOWED_PROVIDERS filter reused from ranked_available_models),
+          join each model via model_meta, DROP models with tool_call=false
+          (coding loop needs tools; empty/unknown flag = keep), sort joined
+          models by output price (TSV field 3) DESCENDING, then append
+          no-join models (subscription ids etc.) in registry order. Echo one
+          provider/id per line. Then change `ranked_available_models` /
+          `suggest_chain`: when MODEL_RANK is unset, use derived_rank instead
+          of returning rc1 — suggest_chain slices it exactly as it slices an
+          explicit rank today (plan=top, build=middle down, light=bottom).
+          Add a `review` tier arm to suggest_chain: same slice as build's
+          first pick + fallbacks (middle of the ranking).
       snippet:
-          build_default_prompt() {
-            local proto=''
-            if command -v expected_protocol_block >/dev/null 2>&1; then
-              proto="$(expected_protocol_block "$TRACKER_FILE" "$VERIFY_CMD" \
-                       "$STEP_TOKEN" "$DONE_TOKEN" 2>/dev/null)" || proto=''
-            fi
-            if [ -n "$proto" ]; then
-              printf '%s\n\nRead AGENTS.md and LEARNINGS.md for project-specific facts (not loop protocol). Do NOT edit .ratchet.conf. When the step is complete print %s on its own line; if no work remains print %s.\n' \
-                "$proto" "$STEP_TOKEN" "$DONE_TOKEN"
-            else
-              printf 'Do ONE discrete step … (today'\''s inline fallback) … %s … %s' "$STEP_TOKEN" "$DONE_TOKEN"
-            fi
-          }
+          # sort ranked by price desc:  printf '%s\n' "${lines[@]}" | sort -t$'\t' -k2 -rn
       accept:
-          Given TRACKER_FILE/VERIFY_CMD/STEP_TOKEN/DONE_TOKEN are set and the
-                template exists
-          When build_default_prompt runs
-          Then its output contains the rendered loop protocol (the "ONE discrete
-               step" / STEP_COMPLETE mechanics) AND a trailer pointing at
-               AGENTS.md for project facts
-          And when the template is unreadable, build_default_prompt still prints
-               a non-empty prompt containing the step + done tokens (fallback,
-               no die)
-      verify: bash test/selftest.sh   (new case: prompt contains protocol
-          substrings with template present; prompt non-empty + tokens present
-          with a bogus RATCHET_ROOT template path)
-      constraints: bash 3.2; best-effort render, never die; template read from
-          $RATCHET_ROOT only; keep the .ratchet.conf-forbidden line.
+          Given MODEL_RANK is unset and a registry + cost cache fixture exist
+          When suggest_chain build runs
+          Then it echoes a non-empty chain ordered by output price descending
+          Given a model has no models.dev join
+          Then it appears after all priced models, never dropped
+          Given MODEL_RANK is set
+          Then behavior is identical to today (explicit rank wins)
+      verify: bash test/selftest.sh   (add cases with fixture caches under
+          test/fixtures: price ordering, no-join appended, tool_call=false
+          dropped, explicit MODEL_RANK unchanged)
+      constraints: ponytail: price∝strength heuristic — ceiling is subsidized/
+          subscription pricing; upgrade path = outcome-based re-rank from
+          loop.log stats (T6.3, optional). Never call the network in the loop
+          path; caches only.
 
-- [x] T1.2 (normal, serial) Export RATCHET_LOOP=1 as the advisory loop signal.
-      touches: lib/run-turn.sh, test/selftest.sh
-      do: In run-turn.sh, right before the block that conditionally exports
-          RATCHET_FANOUT (currently lib/run-turn.sh:62-65, inside run_turn, just
-          above the `vlog "invoking: …"` line), add `export RATCHET_LOOP=1`. It
-          must be exported UNCONDITIONALLY for every spawned turn (unlike FANOUT,
-          which is hard-task-only), so any child process (agent, subagent, verify
-          hook) can read "am I inside a ratchet loop turn?". Add a one-line
-          comment: advisory only — routing/telemetry, never a gate (constraint 3).
+- [ ] T2.2 (normal) rank snapshot + `ratchet models rank` subcommand
+      touches: lib/models.sh, lib/model-select.sh, lib/commands.sh
+      do: Derived ranks must not reshuffle mid-project on catalog churn. On
+          first derivation, write the derived list to $RATCHET_HOME/rank.derived
+          and serve from that file on later calls. Add `ratchet models rank`
+          (in cmd_models): prints the effective ranking (explicit MODEL_RANK or
+          snapshot) with per-model cost marks reusing _chain_with_marks;
+          `ratchet models rank refresh` re-derives (refreshes both caches via
+          pi_model_registry refresh + model_cost_registry refresh) and
+          rewrites the snapshot. Doctor: add one line reporting rank source
+          (explicit | derived-snapshot | none) and count of unranked no-join
+          models.
       accept:
-          Given a spawned loop turn
-          When the agent process inspects its environment
-          Then RATCHET_LOOP=1 is present
-          And it is exported for EVERY turn, not just hard/fanout turns
-      verify: bash test/selftest.sh   (case: source run-turn.sh context or grep
-          the export is unconditional and above the agent spawn; assert
-          RATCHET_LOOP set in a stubbed turn env)
-      constraints: bash 3.2; unconditional export; advisory-only (add nothing
-          that READS it as authority).
+          Given no MODEL_RANK and no snapshot
+          When suggest_chain first runs
+          Then $RATCHET_HOME/rank.derived is created and later calls reuse it
+          When ratchet models rank refresh runs
+          Then the snapshot is rewritten from live registry + costs
+      verify: bash test/selftest.sh   (add cases: snapshot created once, reused,
+          refresh rewrites)
+      constraints: snapshot is plain lines, printf'd; no jq/python in loop path.
 
-- [x] T1.3 (normal, serial) Assert RATCHET_LOOP is never used as authority.
-      touches: test/selftest.sh
-      do: Add a guard test proving constraint 3 holds: grep lib/ and bin/ for any
-          read of RATCHET_LOOP (`$RATCHET_LOOP`, `${RATCHET_LOOP`) and assert the
-          ONLY occurrence is the `export RATCHET_LOOP=1` write in run-turn.sh — no
-          `if`/`case`/`[ … RATCHET_LOOP … ]` branch reads it to gate a commit,
-          skip a check, or grant power. This locks the advisory-only invariant so
-          a future turn can't quietly turn the spoofable signal into a gate.
+## Milestone 3 — merge-gate + human notification
+> The single human checkpoint mechanism. Loop blocks until a PR merges.
+
+- [ ] T3.1 (trivial) notify_human helper
+      touches: lib/observability.sh
+      do: `notify_human MSG`: emit the message prefixed "HUMAN NEEDED:", print
+          a terminal bell (printf '\a' >&2) when stderr is a TTY, and if
+          NOTIFY_CMD is non-empty run it in the background with the message as
+          $1: `sh -c "$NOTIFY_CMD \"\$1\"" _ "$MSG" &`. This is safe ONLY
+          because NOTIFY_CMD can come solely from the trusted, sourced global
+          conf — T1.2 keeps it OFF the repo-conf allowlist, so the existing
+          parser already rejects an agent-adjacent repo conf setting it.
       accept:
-          Given the current source tree
-          When the guard grep runs
-          Then RATCHET_LOOP appears only as the exported write, never in a
-               conditional that changes security/commit behavior
-      verify: bash test/selftest.sh   (the new grep-guard case is green)
-      constraints: test-only; if a real reader is ever needed later, this test
-          is the intentional gate that must be consciously updated.
+          Given NOTIFY_CMD set in the global conf to a script that touches a file
+          When notify_human "x" runs
+          Then the file exists and the loop did not block
+          Given NOTIFY_CMD=x in a repo .ratchet.conf
+          Then parse_repo_conf reports it as an unknown key (existing behavior)
+      verify: bash test/selftest.sh   (add cases: hook fires + does not block;
+          repo-conf NOTIFY_CMD rejected by the allowlist)
+      constraints: SECURITY — never execute a command string that can originate
+          from the parsed repo conf. Global conf is trusted (already sourced
+          today).
 
-- [x] T1.4 (hard, serial) Rewrite this repo's AGENTS.md: human guidance only, no loop block.
-      touches: AGENTS.md, test/selftest.sh
-      do: Replace the entire `ratchet-protocol:v1` managed block (and its Fanout
-          section) with human-facing guidance. Keep NO markers, NO one-turn
-          mechanics. Sections to write (concise): (1) "Loop vs interactive" — one
-          short paragraph: the headless loop briefs its own turns via the harness
-          prompt; if you are a human-led session (`RATCHET_LOOP` unset) work
-          normally, make as many edits as needed, run the tests, the human owns
-          commits. (2) "What this repo is" — task-agnostic bash harness; engine in
-          lib/bin holds ZERO project knowledge; the 4 contract files carry it;
-          this repo dogfoods itself (PLAN.md tracker, `bash test/selftest.sh`
-          gate). (3) "How to work here" — run `ratchet selftest` before done; add
-          a selftest case with non-trivial logic; bash 3.2 only; agnosticism
-          invariant; frozen loop.log formats; read LEARNINGS.md first. (4)
-          "Gotchas" — never edit .ratchet.conf; never bold-wrap a task ID; boolean
-          shell funcs return 0=hit (early-out must return 1); no new deps; author
-          plans via skills/ratchet-plan. This is the human entrypoint — write it
-          for a person, not a loop.
+- [ ] T3.2 (hard) wait_for_merge: poll the PR until merged / closed / timeout
+      touches: bin/ratchet (new function), lib/observability.sh
+      do: `wait_for_merge BRANCH`: requires gh + origin (else notify_human and
+          return 2 = manual mode: loop stops cleanly telling the human to merge
+          and re-run). Loop: `gh pr view BRANCH --json state -q .state` (gh
+          2.4.0-compatible; if -q unsupported parse with sed) every
+          MERGE_POLL_SECS. MERGED → git checkout main (detect default branch
+          via `git symbolic-ref refs/remotes/origin/HEAD`), git pull --ff-only,
+          return 0. CLOSED → notify_human + return 1 (loop stops: human
+          rejected the work). Elapsed > MERGE_WAIT_TIMEOUT (72h default) →
+          notify_human + clean exit message + return 3. Emit a frozen new
+          loop.log line `merge-wait | pr=<branch> | state=<state>` on each
+          state change only (not each poll).
       accept:
-          Given the new AGENTS.md
-          When an interactive agent loads it
-          Then it contains NO `ratchet-protocol` markers and NO instruction to
-               do exactly one step / print STEP_COMPLETE / avoid committing as a
-               standing rule
-          And it explains loop-vs-interactive, the agnosticism invariant, and the
-               core gotchas in human language
-      verify: bash test/selftest.sh   (new case: this repo's AGENTS.md has no
-          `ratchet-protocol:` marker and no `STEP_COMPLETE` mandate line; the
-          agnosticism grep over lib/bin/templates stays green)
-      constraints: doc-only for AGENTS.md; task-agnostic; no project tool names
-          that trip the agnosticism grep.
+          Given a stub gh on PATH returning OPEN then MERGED
+          When wait_for_merge runs with MERGE_POLL_SECS=1
+          Then it returns 0 after the second poll and the repo is on the
+          default branch, fast-forwarded
+          Given the stub returns CLOSED
+          Then it returns 1 and a HUMAN NEEDED line was emitted
+      verify: bash test/selftest.sh   (add cases with a PATH-stubbed gh + a
+          fixture git repo with an origin; timeout path with
+          MERGE_WAIT_TIMEOUT=1)
+      constraints: never `gh pr merge`; poll sleep is interruptible (plain
+          sleep is fine — Ctrl-C is the existing stop story).
 
-## Milestone 2 — Slice 1 cleanup: delete the now-dead tamper machinery (serial)
+## Milestone 4 — plan as PR #0 (full autonomy, no hard stops)
+> Every human decision is a merge button. Plan review included.
 
-> The AGENTS.md protocol block no longer exists on disk, so the guard that
-> stopped an agent editing it is moot. Net deletion.
-
-- [x] T2.1 (hard, serial) Remove conf_tampered and its commit-gate call.
-      touches: lib/commit-gate.sh, test/selftest.sh
-      do: Delete the `conf_tampered()` function (lib/commit-gate.sh:55-77) and
-          its invocation in `commit_turn` (the `if conf_tampered; then … BLOCKED:
-          … AGENTS.md protocol markers … return 1; fi` block at
-          lib/commit-gate.sh:100-107). Its whole job — stop the agent rewriting
-          the AGENTS.md loop block — is gone because there is no block. Leave the
-          `.ratchet.conf` unstage line (lib/commit-gate.sh:~95, `git reset -q --
-          .ratchet.conf`) UNTOUCHED — conf protection is separate and stays. Then
-          delete the AGENTS.md-tamper cases in the selftest: suite 19 (protocol
-          block tamper guard, test/selftest.sh:1256-1322) and the tamper cases in
-          the commit-gate suite (test/selftest.sh:680-700 area) that call
-          `conf_tampered`. Keep every OTHER commit-gate test (secret scan, verify
-          gate, nothing-staged).
+- [ ] T4.1 (normal) plan_is_ready detector
+      touches: lib/tracker.sh
+      do: `plan_is_ready()`: return 0 when the tracker has ≥1 open task line
+          carrying an explicit (trivial|normal|hard) tag AND contains no
+          template placeholder marker `_(` anywhere in the file. NOTE: the
+          PLAN.seed.md template ships with TAGGED tasks, so a tag alone does
+          not mean "ready" — the placeholder markers (`_(exact paths)_`,
+          `_(replace ...)_`) are the seed's real signature. An untagged bare
+          checkbox plan is also "not ready". A tracker with only [x] tasks is
+          ready (nothing to plan).
       accept:
-          Given lib/ after this task
-          When you grep for conf_tampered
-          Then it is defined nowhere and called nowhere
-          And commit_turn still unstages .ratchet.conf, still runs the secret
-               scan and the green gate
-          And the selftest is green with the AGENTS.md-tamper cases removed
-      verify: bash test/selftest.sh   (suite passes without the deleted cases;
-          add/confirm a case asserting .ratchet.conf is still unstaged by
-          commit_turn)
-      constraints: delete only AGENTS.md-tamper logic; .ratchet.conf unstaging
-          and all non-tamper gate behavior byte-identical; bash 3.2.
+          Given the PLAN.seed.md template
+          When plan_is_ready runs
+          Then it returns 1 (placeholder markers present despite tags)
+          Given this PLAN.md
+          Then it returns 0
+          Given a plan with untagged checkboxes only
+          Then it returns 1
+      verify: bash test/selftest.sh   (add cases: seed→not ready, this plan→
+          ready, untagged→not ready, all-done→ready)
+      constraints: pure grep/sed/awk; no state.
 
-- [x] T2.2 (normal, serial) Drop expected_protocol_block's stamping role; keep it as the prompt renderer.
-      touches: lib/commands.sh, test/selftest.sh
-      do: `expected_protocol_block` (lib/commands.sh:29-35) is now used by ONE
-          caller: the prompt injection in build_default_prompt (T1.1). Its old
-          caller `stamp_protocol` (commands.sh:39-69) wrote the block into
-          AGENTS.md — that role is gone. Remove `stamp_protocol` and its call in
-          `cmd_init` (commands.sh:107-109, the "stamp the AGENTS.md protocol
-          block" step + its emit). Keep `expected_protocol_block` itself (it
-          renders the template for the prompt) but it no longer needs to emit
-          marker lines if that simplifies it — MINIMAL change: leave its output
-          shape as-is so T1.1's injection is unaffected; only remove the
-          stamp/write path and its selftest cases (suite 19 Tests 2-9 that call
-          stamp_protocol, already partly removed in T2.1 — finish the job).
+- [ ] T4.2 (hard) auto-plan → branch → PR #0 → merge-gate in the run path
+      touches: bin/ratchet, lib/commands.sh
+      do: In main(), when PR_CADENCE=milestone and ! plan_is_ready: create
+          branch ratchet/plan off the default branch, run ONE plan turn
+          (existing cmd_plan body — extract its turn+commit core into a helper
+          `plan_turn` so cmd_plan and this path share it), push, open PR #0
+          titled "ratchet plan: <repo>" with the tracker diff summary as body,
+          then wait_for_merge. On merge: continue straight into the build loop
+          (NO emit_plan_review_stop in this path — the PR merge WAS the
+          review). Standalone `ratchet plan` keeps today's hard stop unchanged.
+          When PR_CADENCE=done, behavior is unchanged (no auto-plan).
       accept:
-          Given commands.sh after this task
-          When you grep for stamp_protocol
-          Then it is defined nowhere and called nowhere
-          And expected_protocol_block still renders the template with the four
-               substitutions (the prompt path in T1.1 still works)
-          And `ratchet init` no longer writes a protocol block into AGENTS.md
-      verify: bash test/selftest.sh   (keep the expected_protocol_block
-          substitution case; remove the stamp_protocol create/idempotent cases)
-      constraints: keep expected_protocol_block working for the prompt; remove
-          only the AGENTS.md-write path; bash 3.2.
+          Given PR_CADENCE=milestone, a not-ready tracker, stubbed pi + gh
+          When ratchet run starts
+          Then a ratchet/plan branch with a plan commit is pushed, a PR is
+          opened, and the loop proceeds only after the stub reports MERGED
+          Given PR_CADENCE=done
+          Then no plan turn runs and startup is unchanged
+      verify: bash test/selftest.sh   (add integration case with stubbed
+          pi/gh/git remote fixture)
+      constraints: plan turn commits ONLY tracker + LEARNINGS.md (existing
+          plan_commit); the mandatory-stop code path must remain for
+          cmd_plan/cmd_new.
 
-## Milestone 3 — Slice 2: port the split to every ratchet-managed repo (serial)
+## Milestone 5 — milestone branches, review turn, PR per milestone
+> The bounded context for a PR = one milestone (planner-sized, ≤~400 lines).
 
-> Deferred on purpose until Slice 1 proved out. Target repos are stamped by the
-> SAME templates + cmd_init + doctor path, so the fix ports automatically — but
-> already-onboarded repos still carry a v1 loop-in-file block that must be
-> detected and removed, preserving human prose.
-
-- [x] T3.1 (normal, serial) init seeds a human AGENTS.md body and strips any legacy loop block.
-      touches: lib/commands.sh, templates/AGENTS.human.md, test/selftest.sh
-      do: Create `templates/AGENTS.human.md` — a task-agnostic seed for a target
-          repo's human AGENTS.md (mirrors this repo's new AGENTS.md structure from
-          T1.4 but generic: loop-vs-interactive note, "read your PLAN.md +
-          LEARNINGS.md", "the loop briefs its own turns", placeholder for project
-          rules). In `cmd_init` (where step 5 used to call stamp_protocol, now
-          removed in T2.2), instead: if the repo's AGENTS.md still contains a
-          `ratchet-protocol:.*:begin` block, STRIP that marker block (reuse the
-          awk marker-delete shape from the old stamp_protocol re-stamp, but delete
-          instead of replace), preserving all prose outside the markers; then, if
-          AGENTS.md is absent or has no human body, append/seed
-          `templates/AGENTS.human.md`. Emit what happened ("migrated legacy loop
-          block out of AGENTS.md" / "seeded human AGENTS.md"). NEVER touch content
-          the user wrote outside the markers (constraint: migration only ever
-          edits inside-marker content).
+- [ ] T5.1 (normal) milestone branch lifecycle
+      touches: bin/ratchet
+      do: When PR_CADENCE=milestone, before the first turn of each milestone
+          (detect: current milestone name differs from .ratchet/milestone.cur,
+          a printf'd one-line state file holding "name<TAB>base-sha"), create
+          branch ratchet/m-<slug-of-name> off the current default-branch HEAD
+          and record name + base sha in .ratchet/milestone.cur. The build loop
+          otherwise runs unchanged on that branch.
       accept:
-          Given a target repo whose AGENTS.md has a v1 loop-protocol marker block
-                plus human prose below it
-          When `ratchet init` runs
-          Then the marker block is removed, the human prose is preserved verbatim,
-               and a human body seed is present
-          Given a repo with no AGENTS.md
-          When `ratchet init` runs
-          Then AGENTS.md is seeded from templates/AGENTS.human.md with no markers
-      verify: bash test/selftest.sh   (fixture AGENTS.md with markers+prose →
-          assert markers gone, prose kept; empty repo → assert seeded, no markers)
-      constraints: bash 3.2; migration edits ONLY inside-marker content; seed is
-          task-agnostic (agnosticism grep green); no stamp/tamper machinery.
+          Given a fresh milestone starting
+          When the loop begins its first turn
+          Then HEAD is a new ratchet/m-* branch and .ratchet/milestone.cur
+          holds the milestone name and base sha
+      verify: bash test/selftest.sh   (fixture repo: branch created once, not
+          recreated on later turns of the same milestone)
+      constraints: .ratchet/ is already gitignored by init; keep it that way.
 
-- [x] T3.2 (normal, serial) doctor detects a legacy loop-in-file block and reports delivery mode.
-      touches: lib/commands.sh, test/selftest.sh
-      do: Rewrite the doctor "protocol markers present + current in AGENTS.md"
-          block (lib/commands.sh:476-489). New behavior: (a) if AGENTS.md contains
-          any `ratchet-protocol:.*:begin` block → `pr_fail` "AGENTS.md carries a
-          legacy loop-in-file protocol block; run `ratchet init $dir` to migrate
-          (loop protocol now travels in the harness prompt)". (b) otherwise
-          `pr_ok "protocol delivery: harness-prompt (loop briefs its own turns)"`.
-          Remove the old stale/tracker-mismatch marker sub-checks (they assumed
-          the block lives in AGENTS.md). Also update the token-consistency check
-          (commands.sh:527-528, which greps AGENTS.md for the tokens) — the tokens
-          now live in the prompt, not AGENTS.md, so drop that AGENTS.md token grep
-          (or repoint it at the conf). Update the RATCHET_PROTOCOL_VERSION handling
-          note only if needed; the version stays a doctor signal, not a stamp.
+- [ ] T5.2 (hard) milestone-complete detection + review turn (≤2 cycles)
+      touches: bin/ratchet, lib/run-turn.sh (reuse), templates/REVIEW.prompt.md (new)
+      do: After each green commit, when the just-worked milestone has no
+          remaining open/IN PROGRESS tasks (compare tracker_current_milestone
+          against .ratchet/milestone.cur), emit frozen line
+          `milestone-complete | m=<name>` and run ONE review turn: run_turn on
+          the review tier (chain_for_tier review), prompt from a new template
+          REVIEW.prompt.md — read-only review of `git diff <base-sha>..HEAD`,
+          instructing: adopt 4 perspectives (principal engineer, security,
+          product, devil's advocate); MAY spawn ≤4 read-only subagents via the
+          subagent tool if the diff is large (verified available in headless
+          pi); verdict = print REVIEW_PASS, or REVIEW_FAIL after appending
+          must-fix tasks as tagged `- [ ]` lines at the TOP of the current
+          milestone in the tracker (the agent writes the tasks; the harness
+          parses nothing). CLASSIFICATION: call run_turn with the token
+          globals swapped for the duration of the call — STEP_TOKEN=REVIEW_PASS
+          DONE_TOKEN=REVIEW_FAIL (restore both after) — so the existing
+          watchdog early-break AND classify_turn work unmodified: class step ⇒
+          pass, class done ⇒ fail, any error class ⇒ reviewer error. Never
+          strike/bench the review model into the build loop's model state;
+          review errors use only the skip policy below.
+          FAIL → commit tracker (plan_commit-style, markdown only), loop back
+          to build; bound with a cycle counter in .ratchet/milestone.cur
+          (third field); after MAX_REVIEW_CYCLES fails → notify_human + stop.
+          PASS or review turn errors twice → proceed to T5.3 (a broken
+          reviewer must not wedge the pipeline; emit a loud skip line).
       accept:
-          Given a repo whose AGENTS.md still has a loop marker block
-          When `ratchet doctor` runs
-          Then it FAILS with a migrate-to-harness-prompt message naming
-               `ratchet init`
-          Given a migrated repo (no markers)
-          When `ratchet doctor` runs
-          Then it reports "protocol delivery: harness-prompt" and does not fail on
-               missing markers
-      verify: bash test/selftest.sh   (doctor over a legacy-block fixture → fail
-          with migrate msg; over a clean fixture → ok delivery line)
-      constraints: bash 3.2; no re-introduction of stamp/tamper; keep every other
-          doctor check (conf parse, tracker open, VERIFY_CMD dry-run) intact.
+          Given a milestone whose last task just went [x] and a stub agent
+          printing REVIEW_PASS
+          Then loop.log gains milestone-complete and review-pass lines and the
+          loop proceeds to the PR step
+          Given a stub printing REVIEW_FAIL with 2 injected fix tasks
+          Then the tracker gains 2 open tasks in the milestone, cycle=1, and
+          the build loop resumes
+          Given MAX_REVIEW_CYCLES exceeded
+          Then the loop stops with a HUMAN NEEDED line
+      verify: bash test/selftest.sh   (stubbed-agent cases: pass, fail+inject,
+          cycle bound, reviewer-error skip)
+      constraints: review turn is advisory — the green gate still gates every
+          commit; review gates the PR only. New loop.log lines additive:
+          milestone-complete, review-pass, review-fail, review-skip.
 
-- [x] T3.3 (trivial) Document the loop-vs-interactive split and how it ports.
-      touches: README.md, skills/ratchet-plan/SKILL.md
-      do: README: add a short subsection (near "The repo contract (4 files)" or
-          "How it works") explaining that loop protocol travels in the harness
-          prompt, AGENTS.md is the human entrypoint, `RATCHET_LOOP=1` is the
-          advisory in-loop signal, and existing repos migrate via `ratchet init`
-          (doctor flags the legacy block). ratchet-plan skill: fix the line that
-          calls AGENTS.md the agent's protocol memory (SKILL.md:12) to say
-          AGENTS.md is human/project memory and the loop protocol is
-          harness-injected. Keep it honest and task-agnostic.
+- [ ] T5.3 (normal) PR per milestone + merge-gate + size warning
+      touches: bin/ratchet
+      do: Refactor maybe_push_or_pr into `open_milestone_pr NAME BASE_SHA`:
+          push the milestone branch, `gh pr create` with title
+          "ratchet <m-name>: <first completed task subject>", body = completed
+          task list for THIS milestone + `git diff --stat <base>..HEAD` + the
+          review verdict line. If changed lines > PR_SOFT_MAX_LINES, prepend a
+          "⚠ large PR" warning to the body and emit it (soft — never blocks).
+          Then wait_for_merge (M3). On merge: default branch is current and
+          ff'd (wait_for_merge did it) → next milestone (T5.1 cuts the next
+          branch off fresh main → PRs never stack). ALL_DONE path: when
+          PR_CADENCE=milestone the final milestone PR replaces today's global
+          PR; when done, today's maybe_push_or_pr behavior is untouched.
       accept:
-          Given the README and the ratchet-plan skill
-          When a reader asks "why doesn't my interactive agent follow the loop
-               protocol / how do I migrate an old repo"
-          Then the README explains the harness-prompt delivery, the RATCHET_LOOP
-               advisory signal, and the `ratchet init` migration
-      verify: bash test/selftest.sh   (doc-only; agnosticism grep green)
-      constraints: doc-only; vendor/task-agnostic wording.
+          Given a review-passed milestone and stubbed gh
+          When open_milestone_pr runs
+          Then the PR body contains only this milestone's tasks + diffstat and
+          the loop blocks until the stub reports MERGED, then resumes on main
+          Given a diff larger than PR_SOFT_MAX_LINES
+          Then the body and the log carry the large-PR warning
+      verify: bash test/selftest.sh   (stub gh: body content, size warning,
+          resume-on-main)
+      constraints: no `gh pr merge`; PR_CADENCE=done path byte-identical.
 
-## Definition of done
+## Milestone 6 — observability + docs
+- [ ] T6.1 (normal) status/stats surface the new state
+      touches: lib/commands.sh, lib/observability.sh
+      do: cmd_status: show current node (plan-wait|build|review|merge-wait,
+          derived from the newest of the new loop.log lines), review cycle
+          count, and "waiting on PR <branch> since <ts>" when in merge-wait.
+          cmd_stats: count review-pass/review-fail/milestone-complete lines.
+      accept:
+          Given a loop.log fixture containing the new lines
+          When ratchet status / stats run
+          Then node, cycle count, and review tallies render
+      verify: bash test/selftest.sh   (fixture-log cases)
+      constraints: parse only the frozen line grammar; additive.
 
-`bash test/selftest.sh` green. An interactive agent in this repo loads an
-AGENTS.md with NO loop-protocol markers and no one-turn mandate. A loop turn's
-prompt carries the rendered protocol (template-sourced from `$RATCHET_ROOT`,
-with a safe inline fallback) and exports `RATCHET_LOOP=1`. `conf_tampered` and
-`stamp_protocol` are deleted; `.ratchet.conf` unstaging and all other gate
-behavior are unchanged. `ratchet init` migrates a legacy loop-in-file block out
-of a target repo's AGENTS.md (preserving human prose) and seeds a human body;
-`ratchet doctor` fails on a leftover legacy block and otherwise reports
-"protocol delivery: harness-prompt". No security/commit branch reads
-`RATCHET_LOOP`.
+- [ ] T6.2 (trivial) README + conf example docs for the PR-gated flow
+      touches: README.md, templates/ratchet.conf.example
+      do: Document PR_CADENCE=milestone flow with the 5-node diagram (plan PR
+          #0 → build → review → PR → merge-gate), the trilemma rationale (why
+          the loop waits instead of stacking), NOTIFY_CMD examples (macOS
+          afplay/osascript, Linux notify-send), MERGE_WAIT_TIMEOUT=72h default,
+          and `ratchet models rank`.
+      accept:
+          Given the README
+          Then a new "PR-gated autonomy" section documents every new conf key
+      verify: bash test/selftest.sh
+      constraints: docs only.
+
+- [ ] T6.3 (hard) OPTIONAL — outcome-based rank demotion from loop.log stats
+      touches: lib/model-select.sh, lib/observability.sh
+      do: Deferred by default; ponytail: price-heuristic ceiling. Aggregate
+          per-model timeout/hard/exhausted rates across $RATCHET_HOME/logs and
+          demote models whose failure rate exceeds a threshold when building
+          the derived rank snapshot. Skip unless the price heuristic proves
+          insufficient in practice.
+      accept:
+          Given a model with >50% timeout rate in the last 50 turns
+          When ratchet models rank refresh runs
+          Then it is moved below all healthy models in rank.derived
+      verify: bash test/selftest.sh
+      constraints: read-only over logs; snapshot rewrite only via explicit
+          refresh.
 
 ## Non-goals
-
-- No full-screen/ncurses UI, no change to loop.log formats, tracker grammar, or
-  the four-checkpoint human model.
-- No new runtime dependency; python3 stays optional (stats only).
-- No retention of the AGENTS.md managed marker block or its stamp/tamper/version
-  cycle — the panel review rejected the "tiny header" as dual-source complexity.
-  Fully-unmanaged AGENTS.md is the chosen shape.
-- `RATCHET_LOOP` never becomes an authority signal. If a future need arises, the
-  T1.3 guard test is the deliberate gate that must be consciously changed.
-- No automated rewrite of humans' prose in target repos — migration only ever
-  removes content INSIDE the old markers.
+- Parallel milestones / worktrees while a PR awaits merge (future; requires
+  planner `(independent)` tags + worktree isolation).
+- Harness-side subagent orchestration (the agent's own subagent tool covers
+  fan-out review).
+- Stacked PRs (`gh pr create --base <prev>`) — explicitly rejected; the
+  merge-gate is the chosen trade.
+- Auto-merge of any PR. The human merges, always.
+- Turning PR review comments into fix tasks (future enhancement).
