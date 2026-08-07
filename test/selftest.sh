@@ -358,6 +358,20 @@ check_unknown_key() {
 }
 check_unknown_key
 
+# New keys: MODEL_RANK, PR_CADENCE parse, numeric-validated keys strip non-digits
+check_new_keys() {
+  local tmpconf; tmpconf="$(mktemp)"
+  printf 'MODEL_RANK=x\nPR_CADENCE=milestone\nMERGE_POLL_SECS=abc123def\n' > "$tmpconf"
+  if parse_repo_conf "$tmpconf" 2>/dev/null; then
+    [ -z "$RATCHET_CONF_ERRORS" ] && [ "$MODEL_RANK" = "x" ] && [ "$PR_CADENCE" = "milestone" ] && [ "$MERGE_POLL_SECS" = "123" ] \
+      && ok "new keys parse, numeric sanitized" || fail "new-keys parse failed: rank=$MODEL_RANK cadence=$PR_CADENCE poll=$MERGE_POLL_SECS errors=$RATCHET_CONF_ERRORS"
+  else
+    fail "new-keys rejected"
+  fi
+  rm -f "$tmpconf"
+}
+check_new_keys
+
 echo "== suite 5: tier routing =="
 # chain_for_tier: unset tier -> MODELS fallback
 check_chain() {  # NAME TIER PLAN_M BUILD_M LIGHT_M MODELS EXPECTED
@@ -372,6 +386,11 @@ check_chain "light-set" "light" "" "" "l/a" "m/x" "l/a"
 check_chain "plan-unset" "plan" "" "" "" "m/x,m/y" "m/x,m/y"
 check_chain "build-unset" "build" "" "" "" "m/x,m/y" "m/x,m/y"
 check_chain "light-unset" "light" "" "" "" "m/x,m/y" "m/x,m/y"
+# review tier tests
+REVIEW_MODELS="zai/glm-5.2"; MODELS="m/x"; got="$(chain_for_tier review)"
+[ "$got" = "zai/glm-5.2" ] && ok "review-set" || fail "review-set -> got=$got want=zai/glm-5.2"
+REVIEW_MODELS=""; MODELS="m/x,m/y"; got="$(chain_for_tier review)"
+[ "$got" = "m/x,m/y" ] && ok "review-unset" || fail "review-unset -> got=$got want=m/x,m/y"
 
 # thinking_for_tier: unset tier -> THINKING fallback, build-hard bump logic
 check_thinking() {  # NAME TIER PLAN_T BUILD_T LIGHT_T THINKING EXPECTED
@@ -386,6 +405,11 @@ check_thinking "light-set" "light" "" "" "off" "low" "off"
 check_thinking "plan-unset" "plan" "" "" "" "low" "low"
 check_thinking "build-unset" "build" "" "" "" "medium" "medium"
 check_thinking "light-unset" "light" "" "" "" "high" "high"
+# review tier tests
+THINKING_REVIEW="medium"; THINKING="low"; got="$(thinking_for_tier review)"
+[ "$got" = "medium" ] && ok "review-set" || fail "review-set -> got=$got want=medium"
+THINKING_REVIEW=""; THINKING="high"; got="$(thinking_for_tier review)"
+[ "$got" = "high" ] && ok "review-unset" || fail "review-unset -> got=$got want=high"
 # build-hard bump logic: bump one notch above THINKING when THINKING_BUILD is empty
 check_thinking "hard-bump-off" "build-hard" "" "" "" "off" "minimal"
 check_thinking "hard-bump-minimal" "build-hard" "" "" "" "minimal" "low"

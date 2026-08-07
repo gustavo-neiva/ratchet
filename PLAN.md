@@ -27,7 +27,7 @@ VERIFY_CMD: bash test/selftest.sh
 ## Milestone 1 — review tier + contract keys (config plumbing)
 > Everything later hangs off these keys. Pure plumbing, mirrors the plan tier.
 
-- [ ] T1.1 (normal) add the `review` tier to model routing
+- [x] T1.1 (normal) add the `review` tier to model routing
       touches: lib/model-fallback.sh, lib/common.sh
       do: Mirror the existing plan tier exactly. In `chain_for_tier`, add a
           `review` case returning `$REVIEW_MODELS` (fallback: flat MODELS, then
@@ -44,7 +44,7 @@ VERIFY_CMD: bash test/selftest.sh
       verify: bash test/selftest.sh   (add cases: review tier set, unset≡flat)
       constraints: additive; do not touch plan/build/light arms.
 
-- [ ] T1.2 (trivial) allowlist the new contract keys
+- [x] T1.2 (trivial) allowlist the new contract keys
       touches: lib/contract.sh, templates/ratchet.conf.example
       do: Append to CONTRACT_KEYS: REVIEW_MODELS THINKING_REVIEW MODEL_RANK
           MAX_REVIEW_CYCLES PR_CADENCE MERGE_POLL_SECS MERGE_WAIT_TIMEOUT
@@ -66,7 +66,7 @@ VERIFY_CMD: bash test/selftest.sh
           MERGE_POLL_SECS is stripped to digits)
       constraints: allowlist parser semantics unchanged; never source the conf.
 
-- [ ] T1.3 (normal) defaults + `--pr-cadence` flag wiring
+- [x] T1.3 (normal) defaults + `--pr-cadence` flag wiring
       touches: lib/common.sh, bin/ratchet
       do: Defaults in common.sh: PR_CADENCE=done, MAX_REVIEW_CYCLES=2,
           MERGE_POLL_SECS=300, MERGE_WAIT_TIMEOUT=259200 (72h), NOTIFY_CMD="",

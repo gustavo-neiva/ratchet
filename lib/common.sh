@@ -55,6 +55,8 @@ LIGHT_MODELS=""                 # comma-separated chain for trivial tasks (unset
 THINKING_PLAN=""                # thinking level for PLAN tier (unset → THINKING)
 THINKING_BUILD=""               # thinking level for BUILD tier (unset → THINKING)
 THINKING_LIGHT=""               # thinking level for LIGHT tier (unset → THINKING)
+REVIEW_MODELS=""                # comma-separated chain for review turns (unset → MODELS or auto-derived)
+THINKING_REVIEW=""              # thinking level for REVIEW tier (unset → THINKING)
 
 # --- fanout strategy (v1.1, default off) ---
 FANOUT=""                       # off|scout|scout+review (empty = off). Enables subagent tool on (hard) tasks.

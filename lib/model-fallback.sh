@@ -80,6 +80,7 @@ chain_for_tier() {
     plan)  chain="$PLAN_MODELS" ;;
     build) chain="$BUILD_MODELS" ;;
     light) chain="$LIGHT_MODELS" ;;
+    review) chain="$REVIEW_MODELS" ;;
     *)     chain="" ;;
   esac
   # tier-specific override wins
@@ -114,6 +115,7 @@ thinking_for_tier() {
     plan)  level="$THINKING_PLAN" ;;
     build) level="$THINKING_BUILD" ;;
     light) level="$THINKING_LIGHT" ;;
+    review) level="$THINKING_REVIEW" ;;
     build-hard)
       # Hard tasks: bump one notch above BUILD tier, but only if THINKING_BUILD is unset.
       if [ -z "$THINKING_BUILD" ]; then
