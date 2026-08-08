@@ -294,6 +294,58 @@ check_task_block "block-inprogress-wins" "- [IN PROGRESS] T2.1 (hard) big
 - [ ] T2.2 (trivial) small"
 check_task_block "block-empty-tracker" "" ""
 
+# plan_is_ready tests
+check_plan_ready() {  # NAME EXPECTED_RC PLAN_CONTENT
+  local name="$1" exp_rc="$2" content="$3" got_rc tmpdir tmpplan
+  tmpdir="$(mktemp -d)"
+  tmpplan="$tmpdir/PLAN.md"
+  printf '%s' "$content" > "$tmpplan"
+  REPO_DIR="$tmpdir" TRACKER_FILE="PLAN.md" plan_is_ready
+  got_rc=$?
+  rm -rf "$tmpdir"
+  [ "$got_rc" -eq "$exp_rc" ] && ok "$name" || fail "$name -> got rc=$got_rc want=$exp_rc"
+}
+
+# seed template has placeholders + tags = not ready
+check_plan_ready "seed-template-not-ready" 1 "## M0
+- [ ] T0.1 (trivial) scaffold
+      touches: _(exact paths)_
+      do: _(what to scaffold)_"
+
+# this PLAN.md has tags + no placeholders = ready
+check_plan_ready "tagged-no-placeholders-ready" 0 "## M1
+- [ ] T1.1 (normal) implement
+      touches: lib/foo.sh
+      do: add the function"
+
+# untagged checkboxes only = not ready
+check_plan_ready "untagged-only-not-ready" 1 "## M1
+- [ ] do something
+- [ ] do another thing"
+
+# all tasks done = ready (nothing to plan)
+check_plan_ready "all-done-ready" 0 "## M1
+- [x] T1.1 (normal) done
+- [x] T1.2 (trivial) also done"
+
+# mix of tagged open and done = ready (has tagged open)
+check_plan_ready "tagged-open-ready" 0 "## M1
+- [x] T1.1 (normal) done
+- [ ] T1.2 (hard) not done yet"
+
+# IN PROGRESS task with tag = ready
+check_plan_ready "inprogress-tagged-ready" 0 "- [IN PROGRESS] T2.1 (normal) working on it"
+
+# placeholder in backticks (code example) should be ignored
+check_plan_ready "backtick-placeholder-ok" 0 "## M1
+- [ ] T1.1 (normal) fix
+      do: remove \`_(old pattern)_\` from code"
+
+# placeholder not in backticks = not ready
+check_plan_ready "real-placeholder-not-ready" 1 "## M1
+- [ ] T1.1 (normal) fix
+      do: edit _(which file)_ to add logic"
+
 echo "== suite 3: milestone parsing =="
 check_milestones() {  # NAME EXPECTED_COUNT PLAN_CONTENT
   local name="$1" exp_count="$2" content="$3" got tmpdir tmpplan count

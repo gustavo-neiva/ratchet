@@ -1,10 +1,4 @@
 ## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T04:10:08Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T04:42:34Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T05:11:10Z
-## auto-captured
   ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T05:43:34Z
 ## auto-captured
   ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T06:12:09Z
@@ -48,3 +42,9 @@
   ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T14:42:36Z
 ## auto-captured
 selftest: 246 passed, 1 failed  # 2026-08-08T16:16:41Z
+## auto-captured
+selftest: 258 passed, 1 failed  # 2026-08-08T17:18:20Z
+## auto-captured
+selftest: 258 passed, 1 failed  # 2026-08-08T17:27:45Z
+## auto-captured
+selftest: 258 passed, 1 failed  # 2026-08-08T17:45:12Z
