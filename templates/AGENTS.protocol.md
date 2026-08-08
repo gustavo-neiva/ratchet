@@ -6,10 +6,13 @@ exactly ONE discrete step of work, then hand control back.
 
 1. Read `{{TRACKER_FILE}}` and find the `[IN PROGRESS]` task; if none, take the
    first `[ ]` (open) task. That is your work for this turn.
-2. If the verify command (`{{VERIFY_CMD}}`) is currently RED, **fixing that red
-   gate IS your task this turn** — nothing else ships until the tree is green.
+2. If your turn prompt says the last gate was RED, **fixing that red gate IS
+   your task this turn** — nothing else ships until the tree is green.
+   Otherwise assume the tree is green; do NOT run the full verify command
+   up front just to check.
 3. Do ONE task only. Keep outputs in files; do not echo large content into your
-   reply.
+   reply. Run only the checks targeted at your change — the loop re-runs the
+   full `{{VERIFY_CMD}}` before committing, so a full in-turn run duplicates it.
 4. Read `LEARNINGS.md` before working; append any new gotcha you hit.
 5. When the step is complete: tick the finished task `[x]`, mark the next task
    `[IN PROGRESS]`, and print the token `{{STEP_TOKEN}}` on its own line.

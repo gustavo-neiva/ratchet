@@ -92,10 +92,12 @@ commit_turn() {
     if [ -n "$VERIFY_CMD" ]; then
       emit "  commit gate: running '$VERIFY_CMD' …"
       if ! ( cd "$REPO_DIR" && eval "$VERIFY_CMD" ) >>"$LOOP_LOG" 2>&1; then
-        emit "  commit gate RED — NOT committing; leaving work for next turn to repair."
-        # append last error line to LEARNINGS.md
+        # capture the verify's actual last failure line BEFORE emitting the RED
+        # banner (emitting first made the capture grab its own banner — 17 junk
+        # "commit gate RED" lines polluted LEARNINGS.md and every turn's context).
         local _lrn="$REPO_DIR/LEARNINGS.md" _err _ts
-        _err=$(tail -n 20 "$LOOP_LOG" | grep -v '^[[:space:]]*$' | tail -n1)
+        _err=$(tail -n 20 "$LOOP_LOG" | grep -v '^[[:space:]]*$' | grep -v 'commit gate' | tail -n1)
+        emit "  commit gate RED — NOT committing; leaving work for next turn to repair."
         [ -n "$_err" ] && _ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" && {
           grep -qxF "$_err" "$_lrn" 2>/dev/null || {
             echo "## auto-captured" >>"$_lrn" 2>/dev/null || true

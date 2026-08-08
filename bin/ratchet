@@ -346,13 +346,21 @@ main() {
     tasktext=$(printf '%s' "$task_info" | sed -E 's/^[^ ]* \([^)]*\) //')
     term_only "$(render_status_block "$done_n" "$total_n" "$mname" "$mdone" "$mtotal" "$turn" "$tier" "$model" "$taskid" "$tasktext")"
 
-    # inject the already-known current task into the prompt: saves the agent
-    # 1-3 discovery round-trips per ephemeral turn (the tracker stays authoritative).
+    # inject the current task's FULL tracker block (do:/accept:/touches:) into
+    # the prompt: saves the agent re-reading the whole tracker + 1-3 discovery
+    # round-trips per ephemeral turn (the tracker stays authoritative).
     if [ -z "$PROMPT_OVERRIDE" ]; then
       PROMPT="$(build_default_prompt)"
-      [ -n "$next_task" ] && PROMPT="$PROMPT
+      local task_block; task_block=$(tracker_task_block)
+      if [ -n "$task_block" ]; then
+        PROMPT="$PROMPT
+Your current task, quoted from $TRACKER_FILE (authoritative — verify it is still the first open/IN PROGRESS task there before starting):
+$task_block"
+      elif [ -n "$next_task" ]; then
+        PROMPT="$PROMPT
 The current tracker task is: $next_task
 (Verify it is still the first open/IN PROGRESS task in $TRACKER_FILE before starting.)"
+      fi
       # inject last-turn note if available
       [ -f "$LOG_DIR/last_turn.note" ] && PROMPT="$PROMPT
 $(cat "$LOG_DIR/last_turn.note")"
@@ -428,6 +436,18 @@ $(cat "$LOG_DIR/last_turn.note")"
         [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
         sleep "$SHORT_SLEEP" ;;
       timeout)
+        # salvage: a killed turn's edits persist on disk. If the tree changed
+        # and the gate is green, commit the work instead of discarding ~20min
+        # of progress — the next turn continues from a committed tree instead
+        # of cold-rediscovering. RED or no changes -> normal strike path.
+        if [ -d .git ] && [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+          if commit_turn "$turn" "$model" && [ "$COMMITTED_THIS_TURN" = 1 ]; then
+            emit "turn killed ($TURN_STATUS) but tree was green — salvaged work as a commit; continuing."
+            transient_arr[$idx]=0
+            [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
+            sleep "$SHORT_SLEEP"; continue
+          fi
+        fi
         bump_transient "$idx"
         local n=${transient_arr[$idx]} backoff=$(( SHORT_SLEEP * n ))
         emit "model $model TIMEOUT (deadline-${TURN_TIMEOUT}s, no token/error). strike ${n}/${MAX_TRANSIENT}; backing off ${backoff}s."

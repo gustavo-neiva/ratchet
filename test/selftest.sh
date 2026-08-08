@@ -266,6 +266,34 @@ check_id_text "inprogress-wins" "T2.1 (hard) $(printf '%.60s' 'big task with lon
 - [ ] T2.2 (trivial) small task"
 check_id_text "empty-tracker" "? (normal) " ""
 
+# tracker_task_block tests (full block injected into the turn prompt)
+check_task_block() {  # NAME EXPECTED PLAN_CONTENT
+  local name="$1" exp="$2" content="$3" got tmpdir
+  tmpdir="$(mktemp -d)"
+  printf '%s' "$content" > "$tmpdir/PLAN.md"
+  REPO_DIR="$tmpdir" TRACKER_FILE="PLAN.md" got="$(tracker_task_block)"
+  rm -rf "$tmpdir"
+  [ "$got" = "$exp" ] && ok "$name" || fail "$name -> got='$got' want='$exp'"
+}
+check_task_block "block-with-body" "- [ ] T1.1 (normal) do the thing
+      do: edit foo.sh
+      accept: bar passes" "## M1
+- [ ] T1.1 (normal) do the thing
+      do: edit foo.sh
+      accept: bar passes
+- [ ] T1.2 (trivial) next task"
+check_task_block "block-stops-at-heading" "- [ ] T1.1 (normal) last task
+      do: edit foo.sh" "- [ ] T1.1 (normal) last task
+      do: edit foo.sh
+## Notes
+prose here"
+check_task_block "block-inprogress-wins" "- [IN PROGRESS] T2.1 (hard) big
+      do: things" "- [ ] skipped? no: done-heading skip only
+- [IN PROGRESS] T2.1 (hard) big
+      do: things
+- [ ] T2.2 (trivial) small"
+check_task_block "block-empty-tracker" "" ""
+
 echo "== suite 3: milestone parsing =="
 check_milestones() {  # NAME EXPECTED_COUNT PLAN_CONTENT
   local name="$1" exp_count="$2" content="$3" got tmpdir tmpplan count

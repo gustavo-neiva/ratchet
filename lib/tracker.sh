@@ -90,6 +90,23 @@ tracker_completed_list() {
     | sed -E 's/^[[:space:]]*-?[[:space:]]*//; s/\*\*//g'
 }
 
+# tracker_task_block -> echoes the CURRENT task's full block: the task line
+# plus its indented continuation lines (do:/accept:/touches:...), up to the next
+# task line or heading. Injected into the turn prompt so ephemeral turns skip
+# re-reading the whole tracker to find their spec. Empty when no open task.
+tracker_task_block() {
+  local line n file="$REPO_DIR/$TRACKER_FILE"
+  line=$(tracker_next inprogress)
+  [ -z "$line" ] && line=$(tracker_next open)
+  [ -z "$line" ] && return 0
+  n=${line%%:*}
+  awk -v start="$n" 'NR == start { print; next }
+       NR > start {
+         if ($0 ~ /^[[:space:]]*-?[[:space:]]*\[/ || $0 ~ /^#+ /) exit
+         print
+       }' "$file"
+}
+
 # tracker_next_tag -> echoes the tag (trivial|normal|hard) of the first
 # [IN PROGRESS] task, or if none, the first [ ] task. Echoes "normal" when
 # untagged or no task exists. Used for tiered model routing.
