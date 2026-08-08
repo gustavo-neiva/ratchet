@@ -85,7 +85,7 @@ VERIFY_CMD: bash test/selftest.sh
 > "Auto model choosing" that works for any user, any provider, any catalog.
 > Rank = output price descending from models.dev, availability from pi.
 
-- [ ] T2.1 (hard) derived_rank: price-ordered ranking when MODEL_RANK is unset
+- [x] T2.1 (hard) derived_rank: price-ordered ranking when MODEL_RANK is unset
       touches: lib/model-select.sh
       do: Add `derived_rank()`: read pi_model_registry (availability ground
           truth, ALLOWED_PROVIDERS filter reused from ranked_available_models),

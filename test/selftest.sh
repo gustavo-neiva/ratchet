@@ -1471,6 +1471,7 @@ else
 fi
 
 # Test 5: ALLOWED_PROVIDERS filter
+MODEL_RANK="anthropic/claude-opus-4-8,anthropic/claude-sonnet-4-5,zai/glm-5.2,zai/glm-4.5-air"
 ALLOWED_PROVIDERS="zai"
 ranked_zai="$(ranked_available_models)"
 if echo "$ranked_zai" | grep -q "anthropic"; then
@@ -1485,22 +1486,58 @@ else
   fail "ranked_available_models: expected zai/glm-5.2, got='$ranked_zai'"
 fi
 
-# Test 6: MODEL_RANK unset with 2+ models returns models (no explicit ranking but not empty)
+# Test 6: MODEL_RANK unset uses derived_rank (price-ordered DESC)
 MODEL_RANK=""
 ALLOWED_PROVIDERS=""
 ranked_unset="$(ranked_available_models)"
-if [ -n "$ranked_unset" ]; then
-  ok "ranked_available_models: MODEL_RANK unset returns available models"
+if echo "$ranked_unset" | head -1 | grep -q "anthropic/claude-opus-4-8"; then
+  ok "derived_rank: MODEL_RANK unset returns price-ordered (opus-4-8 first)"
 else
-  fail "ranked_available_models: should return models even when MODEL_RANK unset"
+  fail "derived_rank: expected opus-4-8 first (highest cost), got=$(echo "$ranked_unset" | head -1)"
 fi
 
-# Test 7: suggest_chain with MODEL_RANK unset returns empty (no reliable ranking)
+# Test 7: suggest_chain works with MODEL_RANK unset (uses derived_rank)
 MODEL_RANK=""
-if suggest_chain plan >/dev/null 2>&1; then
-  fail "suggest_chain: should return empty (rc1) when MODEL_RANK unset"
+chain_derived="$(suggest_chain plan)"
+if echo "$chain_derived" | grep -q "anthropic/claude-opus-4-8"; then
+  ok "suggest_chain: works when MODEL_RANK unset (derived_rank path)"
 else
-  ok "suggest_chain: returns empty when MODEL_RANK unset (no skill ranking)"
+  fail "suggest_chain: failed with MODEL_RANK unset, got='$chain_derived'"
+fi
+
+# Test 8: tool_call=false filtering in derived_rank
+cat > "$tmp22/models.registry" <<'FIXTURE22REG_TC'
+anthropic/claude-opus-4-8
+anthropic/claude-sonnet-4-5
+test/no-tools
+FIXTURE22REG_TC
+cat > "$tmp22/models.cost" <<'FIXTURE22COST_TC'
+anthropic/claude-opus-4-8	5	25	true	true	200000
+anthropic/claude-sonnet-4-5	3	15	true	true	200000
+test/no-tools	1	5	true	false	100000
+FIXTURE22COST_TC
+MODEL_RANK=""
+ranked_tc="$(ranked_available_models)"
+if echo "$ranked_tc" | grep -q "test/no-tools"; then
+  fail "derived_rank: tool_call=false model should be dropped"
+else
+  ok "derived_rank: tool_call=false models dropped"
+fi
+
+# Test 9: no-join models appended after priced
+cat > "$tmp22/models.registry" <<'FIXTURE22REG_NJ'
+anthropic/claude-opus-4-8
+local/subscription-model
+FIXTURE22REG_NJ
+cat > "$tmp22/models.cost" <<'FIXTURE22COST_NJ'
+anthropic/claude-opus-4-8	5	25	true	true	200000
+FIXTURE22COST_NJ
+MODEL_RANK=""
+ranked_nj="$(ranked_available_models)"
+if echo "$ranked_nj" | tail -1 | grep -q "local/subscription-model"; then
+  ok "derived_rank: no-join models appended after priced"
+else
+  fail "derived_rank: expected subscription model last, got='$ranked_nj'"
 fi
 
 rm -rf "$tmp22"
@@ -1577,16 +1614,19 @@ else
   fail "chain_for_tier derive light: expected cheapest model, got='$got_light'"
 fi
 
-# Test 4: Empty-when-nothing — everything empty → echoes empty, caller handles die
+# Test 4: Empty-when-nothing — no registry available → echoes empty, caller handles die
 PLAN_MODELS=""
 BUILD_MODELS=""
 LIGHT_MODELS=""
 MODELS=""
 MODEL_RANK=""
 
+# Remove registry to test true empty case (derived_rank needs registry)
+rm -f "$tmp23/models.registry" "$tmp23/models.cost"
+
 got_empty="$(chain_for_tier build)"
 if [ -z "$got_empty" ]; then
-  ok "chain_for_tier empty-when-nothing: returns empty when no config"
+  ok "chain_for_tier empty-when-nothing: returns empty when no registry"
 else
   fail "chain_for_tier empty-when-nothing: expected empty, got='$got_empty'"
 fi

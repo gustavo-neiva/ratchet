@@ -15,11 +15,66 @@
 #  keeps today's "no models configured" die path.
 # =============================================================================
 
+# derived_rank -> echo provider/id lines ordered by output price DESC, then
+# no-join models in registry order. Applies ALLOWED_PROVIDERS, filters out
+# tool_call=false (coding loop needs tools). Price heuristic: higher cost =
+# stronger. Ceiling: subsidized/subscription pricing (T6.3 adds outcome stats).
+derived_rank() {
+  local reg avail=() m prov meta tool_call outp priced=() nojoin=()
+  
+  reg="$(pi_model_registry)"
+  [ -z "$reg" ] && return 1
+  
+  # apply ALLOWED_PROVIDERS filter
+  if [ -n "$ALLOWED_PROVIDERS" ]; then
+    while IFS= read -r m; do
+      prov="${m%%/*}"; prov="${prov%%:*}"
+      case ",$ALLOWED_PROVIDERS," in
+        *",$prov,"*) avail+=("$m") ;;
+      esac
+    done <<< "$reg"
+  else
+    while IFS= read -r m; do avail+=("$m"); done <<< "$reg"
+  fi
+  
+  [ "${#avail[@]}" -eq 0 ] && return 1
+  
+  # partition: priced with cost vs no-join
+  for m in "${avail[@]}"; do
+    meta="$(model_meta "$m")"
+    if [ -z "$meta" ]; then
+      nojoin+=("$m")
+      continue
+    fi
+    
+    # field 5 = tool_call
+    tool_call="$(echo "$meta" | cut -f5)"
+    [ "$tool_call" = "false" ] && continue  # drop tool_call=false
+    
+    # field 3 = output cost
+    outp="$(echo "$meta" | cut -f3)"
+    [ -z "$outp" ] && outp="0"
+    priced+=("$outp:$m")
+  done
+  
+  # sort by output cost DESC (-r = reverse), strip price prefix
+  [ "${#priced[@]}" -gt 0 ] && printf '%s\n' "${priced[@]}" | sort -t: -k1 -rn | sed 's/^[^:]*://'
+  
+  # append no-join models
+  [ "${#nojoin[@]}" -gt 0 ] && printf '%s\n' "${nojoin[@]}"
+}
+
 # ranked_available_models -> echo provider/id lines ordered by MODEL_RANK,
 # then unranked models sorted by cost. Applies ALLOWED_PROVIDERS filter FIRST.
 # Returns empty if no models pass the filter.
 ranked_available_models() {
   local reg rank_arr avail=() ranked=() unranked=() m prov found i
+  
+  # if MODEL_RANK is unset, use derived rank
+  if [ -z "${MODEL_RANK:-}" ]; then
+    derived_rank
+    return $?
+  fi
   
   # get live registry (availability = ground truth)
   reg="$(pi_model_registry)"
@@ -38,9 +93,6 @@ ranked_available_models() {
   fi
   
   [ "${#avail[@]}" -eq 0 ] && return 1
-  
-  # if MODEL_RANK is unset or empty, return available models as-is (no ranking)
-  [ -z "${MODEL_RANK:-}" ] && printf '%s\n' "${avail[@]}" && return 0
   
   # split MODEL_RANK into array
   IFS=',' read -ra rank_arr <<< "$MODEL_RANK"
@@ -80,14 +132,11 @@ ranked_available_models() {
   fi
 }
 
-# suggest_chain TIER -> echo comma-separated model chain for plan|build|light.
-# plan: top + next fallback; light: bottom + one-up fallback; build: middle + fallbacks down.
-# If MODEL_RANK is unset, echo empty (rc1) — no reliable skill ranking without it.
+# suggest_chain TIER -> echo comma-separated model chain for plan|build|light|review.
+# plan: top + next fallback; light: bottom + one-up fallback; 
+# build/review: middle + fallbacks down.
 suggest_chain() {
   local tier="$1" ranked out=() total mid i
-  
-  # MODEL_RANK is required for automatic selection (the one ordering knob)
-  [ -z "${MODEL_RANK:-}" ] && return 1
   
   ranked="$(ranked_available_models)"
   [ -z "$ranked" ] && return 1
@@ -111,7 +160,7 @@ suggest_chain() {
       out+=("${arr[$((total-1))]}")
       [ "$total" -ge 2 ] && out+=("${arr[$((total-2))]}")
       ;;
-    build)
+    build|review)
       # middle: model just below plan (or plan's pick if only 2), + fallbacks down
       if [ "$total" -le 2 ]; then
         # only 2 models total: build uses plan's pick (strongest)
