@@ -117,7 +117,7 @@ VERIFY_CMD: bash test/selftest.sh
           loop.log stats (T6.3, optional). Never call the network in the loop
           path; caches only.
 
-- [ ] T2.2 (normal) rank snapshot + `ratchet models rank` subcommand
+- [x] T2.2 (normal) rank snapshot + `ratchet models rank` subcommand
       touches: lib/models.sh, lib/model-select.sh, lib/commands.sh
       do: Derived ranks must not reshuffle mid-project on catalog churn. On
           first derivation, write the derived list to $RATCHET_HOME/rank.derived
@@ -142,7 +142,7 @@ VERIFY_CMD: bash test/selftest.sh
 ## Milestone 3 — merge-gate + human notification
 > The single human checkpoint mechanism. Loop blocks until a PR merges.
 
-- [ ] T3.1 (trivial) notify_human helper
+- [x] T3.1 (trivial) notify_human helper
       touches: lib/observability.sh
       do: `notify_human MSG`: emit the message prefixed "HUMAN NEEDED:", print
           a terminal bell (printf '\a' >&2) when stderr is a TTY, and if
@@ -163,7 +163,7 @@ VERIFY_CMD: bash test/selftest.sh
           from the parsed repo conf. Global conf is trusted (already sourced
           today).
 
-- [ ] T3.2 (hard) wait_for_merge: poll the PR until merged / closed / timeout
+- [IN PROGRESS] T3.2 (hard) wait_for_merge: poll the PR until merged / closed / timeout
       touches: bin/ratchet (new function), lib/observability.sh
       do: `wait_for_merge BRANCH`: requires gh + origin (else notify_human and
           return 2 = manual mode: loop stops cleanly telling the human to merge

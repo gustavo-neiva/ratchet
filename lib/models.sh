@@ -238,7 +238,32 @@ cmd_models() {
       emit "$key=$arg"
       emit "  -> $target"
       ;;
-    *) die "usage: ratchet models [list|add|remove|thinking] ... (see --help)";;
+    rank)
+      if [ "$arg" = "refresh" ]; then
+        refresh_rank_snapshot
+      else
+        # show effective ranking: explicit MODEL_RANK or derived snapshot
+        local reg=""; reg="$(pi_model_registry)" || \
+          emit "note: pi registry unavailable — showing rank without validation marks"
+        if [ -n "${MODEL_RANK:-}" ]; then
+          emit "effective rank: MODEL_RANK (explicit)"
+          local ranked
+          ranked="$(ranked_available_models)" || die "failed to resolve MODEL_RANK"
+          emit "$(_chain_with_marks "$(echo "$ranked" | paste -sd,)" "$reg")"
+        else
+          local snap="$RATCHET_HOME/rank.derived"
+          if [ -f "$snap" ]; then
+            emit "effective rank: derived (snapshot: $snap)"
+          else
+            emit "effective rank: derived (no snapshot yet; will be created on first use)"
+          fi
+          local ranked
+          ranked="$(derived_rank)" || die "failed to derive rank"
+          emit "$(_chain_with_marks "$(echo "$ranked" | paste -sd,)" "$reg")"
+        fi
+      fi
+      ;;
+    *) die "usage: ratchet models [list|add|remove|thinking|rank] ... (see --help)";;
   esac
 }
 
@@ -247,4 +272,16 @@ cmd_models() {
 _models_after_edit() {
   [ "$2" = 1 ] && [ -d "$REPO_DIR/.ratchet" ] && conf_hash "$1" > "$REPO_DIR/.ratchet/conf.hash"
   return 0
+}
+
+# refresh_rank_snapshot — refresh both caches (pi registry + cost) and rewrite
+# rank.derived from live derivation. Called by `ratchet models rank refresh`.
+refresh_rank_snapshot() {
+  pi_model_registry refresh >/dev/null || die "pi registry refresh failed"
+  model_cost_registry refresh >/dev/null || die "cost registry refresh failed"
+  local snap="$RATCHET_HOME/rank.derived" ranked
+  ranked="$(_derive_rank_live)" || die "rank derivation failed"
+  mkdir -p "$RATCHET_HOME"
+  printf '%s\n' "$ranked" > "$snap"
+  emit "rank snapshot refreshed: $snap"
 }

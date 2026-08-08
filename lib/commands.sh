@@ -532,6 +532,25 @@ cmd_doctor() {
   else
     pr_ok "pi registry cache missing/stale — model validation skipped (refresh: ratchet models list)"
   fi
+  
+  # rank source + unranked count
+  local rank_src _nojoin_count=0
+  if [ -n "${MODEL_RANK:-}" ]; then
+    rank_src="explicit"
+  elif [ -f "$RATCHET_HOME/rank.derived" ]; then
+    rank_src="derived-snapshot"
+  else
+    rank_src="none"
+  fi
+  if [ -n "$_reg" ] && [ "$rank_src" != "explicit" ]; then
+    local _m _meta
+    while IFS= read -r _m; do
+      [ -n "$_m" ] || continue
+      _meta="$(model_meta "$_m" 2>/dev/null || true)"
+      [ -z "$_meta" ] && _nojoin_count=$((_nojoin_count + 1))
+    done <<< "$_reg"
+  fi
+  pr_ok "rank source: $rank_src (unranked no-join: $_nojoin_count)"
 
   # tier routing configuration display
   echo "---"

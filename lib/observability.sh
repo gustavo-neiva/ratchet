@@ -7,6 +7,22 @@
 #  writes. `ratchet stats` parses loop.log into the baseline metrics.
 # =============================================================================
 
+# notify_human MSG -> surface a message a human must act on (PR merge, review cap,
+# manual merge mode, etc.). Emits the message prefixed "HUMAN NEEDED:", rings the
+# terminal bell when stderr is a TTY, and runs NOTIFY_CMD in the background with
+# the message as $1. SECURITY: NOTIFY_CMD is an executable command string that
+# may live ONLY in the trusted, sourced global conf — T1.2 keeps it OFF the
+# repo-conf allowlist, so an agent-adjacent repo .ratchet.conf setting it is
+# already rejected by the parser. Never accept it from a parsed source.
+notify_human() {
+  local msg="$1"
+  emit "HUMAN NEEDED: $msg"
+  [ -t 2 ] && printf '\a' >&2
+  if [ -n "${NOTIFY_CMD:-}" ]; then
+    sh -c "$NOTIFY_CMD \"\$1\"" _ "$msg" &
+  fi
+}
+
 # print_new_bytes OFFVAR -> tail new bytes written to TURN_OUT since last offset.
 # Uses byte offsets so it works on bash 3.2 with no external deps.
 print_new_bytes() {

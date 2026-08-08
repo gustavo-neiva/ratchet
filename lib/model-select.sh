@@ -15,11 +15,11 @@
 #  keeps today's "no models configured" die path.
 # =============================================================================
 
-# derived_rank -> echo provider/id lines ordered by output price DESC, then
+# _derive_rank_live -> echo provider/id lines ordered by output price DESC, then
 # no-join models in registry order. Applies ALLOWED_PROVIDERS, filters out
 # tool_call=false (coding loop needs tools). Price heuristic: higher cost =
 # stronger. Ceiling: subsidized/subscription pricing (T6.3 adds outcome stats).
-derived_rank() {
+_derive_rank_live() {
   local reg avail=() m prov meta tool_call outp priced=() nojoin=()
   
   reg="$(pi_model_registry)"
@@ -62,6 +62,23 @@ derived_rank() {
   
   # append no-join models
   [ "${#nojoin[@]}" -gt 0 ] && printf '%s\n' "${nojoin[@]}"
+  return 0
+}
+
+# derived_rank -> echo provider/id lines from snapshot (stable mid-project) or
+# derive live and write snapshot. Snapshot: $RATCHET_HOME/rank.derived
+derived_rank() {
+  local snap="$RATCHET_HOME/rank.derived"
+  if [ -f "$snap" ]; then
+    cat "$snap"
+    return 0
+  fi
+  # no snapshot: derive live and write it
+  local ranked
+  ranked="$(_derive_rank_live)" || return 1
+  mkdir -p "$RATCHET_HOME"
+  printf '%s\n' "$ranked" > "$snap"
+  printf '%s\n' "$ranked"
 }
 
 # ranked_available_models -> echo provider/id lines ordered by MODEL_RANK,

