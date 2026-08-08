@@ -185,6 +185,94 @@ marker block (preserving all your prose outside it) and seeds a human body;
 | 3 | **Green gate (automatic)** | No human; RED tree never commits. |
 | 4 | **PR review** | `--pr` mode: after `ALL_DONE`, the loop opens a PR/MR with completed tasks. You review/merge. |
 
+## PR-gated autonomy (`PR_CADENCE=milestone`)
+
+The default cadence (`PR_CADENCE=done`) opens **one** PR at `ALL_DONE` and is
+what the sections above describe. The milestone cadence restructures the whole
+loop around **merge gates**: the only human action is the merge button, and the
+loop blocks on it between milestones instead of stacking work.
+
+```
+ plan PR #0  →  build  →  review  →  PR  →  merge-gate ─┐
+      ↑                                              merge │
+      └──────────────────────────── next milestone ←──────┘
+```
+
+Five nodes:
+
+1. **plan PR #0** — if the tracker isn't ready (`plan_is_ready` fails: seed
+   placeholders present, or no tagged task), the loop branches `ratchet/plan`
+   off the default branch, runs ONE plan turn, pushes, opens PR #0
+   ("ratchet plan: &lt;repo&gt;"), and **blocks until you merge it**. The merge *is*
+   the plan review — no separate hard stop in this path. (`ratchet plan` /
+   `ratchet new` standalone still hard-stop as before.)
+2. **build** — the normal green-gated turn loop, on a `ratchet/m-&lt;milestone&gt;`
+   branch cut fresh off the (just-ff'd) default branch each milestone.
+3. **review** — when a milestone's last task goes `[x]`, ONE advisory review
+   turn runs on the `review` tier over `git diff &lt;base&gt;..HEAD`. It prints
+   `REVIEW_PASS` or appends must-fix `[ ]` tasks and prints `REVIEW_FAIL`
+   (bounded by `MAX_REVIEW_CYCLES`, default 2; then `notify_human` + stop).
+   The green gate still gates every commit — review gates the *PR* only.
+4. **PR** — `gh pr create` with this milestone's completed tasks + diffstat +
+   the review verdict; a diff over `PR_SOFT_MAX_LINES` (default 400) prepends a
+   ⚠ large-PR warning to the body (soft — never blocks).
+5. **merge-gate** — `wait_for_merge` polls `gh pr view` every `MERGE_POLL_SECS`
+   (default 300s). MERGED → ff the default branch, cut the next milestone
+   branch off it (so PRs **never stack**). CLOSED → stop (human rejected the
+   work). Over `MERGE_WAIT_TIMEOUT` (default 72h) → `notify_human` + clean stop.
+
+### Why the loop waits instead of stacking
+
+The loop faces a trilemma — **sequential work + small PRs + no stacking** —
+and a merge-gate is the clean way to satisfy all three. Each milestone PR is a
+self-contained, reviewable diff off a clean base; the wait *is* the
+human-in-the-loop. The rejected alternatives (stacked PRs, auto-merge,
+worktree fan-out while a PR is open) are all listed under Non-goals in
+`PLAN.md`.
+
+### Notifying the human
+
+`notify_human` prints `HUMAN NEEDED: &lt;msg&gt;`, rings the terminal bell on a
+TTY, and — if `NOTIFY_CMD` is set — runs it in the background with the message
+as `$1`. **`NOTIFY_CMD` is deliberately NOT on the repo-conf allowlist**
+(ratchet rejects it as an unknown key): a repo conf is agent-adjacent and
+parsed, not sourced, so an attacker-controlled repo must never be able to run
+a command. Set it only in the **trusted, sourced global conf** (`~/.ratchet/conf`):
+
+```sh
+# ~/.ratchet/conf  (sourced; trusted; applies to every repo)
+NOTIFY_CMD='afplay /System/Library/Sounds/Glass.aiff'                          # macOS: sound
+NOTIFY_CMD='osascript -e "display notification \"$1\" with title \"ratchet\""'   # macOS: banner
+NOTIFY_CMD='notify-send ratchet "$1"'                                           # Linux
+```
+
+### Inspecting the derived rank (`ratchet models rank`)
+
+Derived ranks are snapshotted to `$RATCHET_HOME/rank.derived` on first use so
+tiers don't reshuffle mid-project when the model catalog churns. Inspect or
+force a refresh:
+
+```bash
+ratchet models rank           # effective rank: explicit MODEL_RANK or derived snapshot
+ratchet models rank refresh   # re-derive from live pi + models.dev caches, rewrite snapshot
+```
+`ratchet doctor` reports the rank source (`explicit | derived-snapshot | none`)
+and the count of unranked no-join models.
+
+### New conf keys (milestone cadence)
+
+All default to off/`done`-equivalent — `PR_CADENCE=done` is byte-identical to
+today's behavior. See `templates/ratchet.conf.example` for commented examples.
+
+| Key | Default | Role |
+|---|---|---|
+| `PR_CADENCE` | `done` | `done` = today; `milestone` = the 5-node flow above |
+| `MAX_REVIEW_CYCLES` | `2` | fail→fix cycles before `notify_human` + stop |
+| `MERGE_POLL_SECS` | `300` | how often `wait_for_merge` polls `gh pr view` |
+| `MERGE_WAIT_TIMEOUT` | `259200` (72h) | after this, stop + notify |
+| `PR_SOFT_MAX_LINES` | `400` | diff lines that trigger the ⚠ large-PR warning |
+| `NOTIFY_CMD` | *(global conf only)* | command run with the message as `$1` |
+
 ### One turn at a time (safe default)
 
 The loop runs **one turn, one commit** — sequential, green-gated, easy to bisect/revert. Parallel turns (`--parallel N`) are opt-in for tasks the tracker marks non-`serial`, each in an isolated `git worktree`. Concurrent writers over a shared tree are never safe.

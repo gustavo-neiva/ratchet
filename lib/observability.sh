@@ -131,8 +131,8 @@ avg_turn_secs() {
 
 # cmd_stats -> parse loop.log into the baseline metrics (step-success rate,
 # wasted wall-hours per 100 turns, % turns on the cheap/first model, plus per-tier
-# and per-model counts from the `turn N | tier=X | model=Y` log lines, and avg/max
-# turn duration from `took=` lines.
+# and per-model counts from the `turn N | tier=X | model=Y` log lines, avg/max
+# turn duration from `took=` lines, and review/milestone tallies.
 cmd_stats() {
   [ -f "$LOOP_LOG" ] || die "no loop.log found at $LOOP_LOG (nothing run here yet?)"
   command -v python3 >/dev/null 2>&1 || die "stats requires python3"
@@ -146,6 +146,7 @@ tier_re = re.compile(r'^turn (\d+) \| tier=(\S+) \| model=(\S+) \| thinking=(\S+
 took_re = re.compile(r'turn \d+ end \| class=\S+ \| took=(\d+)s')
 def parse_ts(s): return datetime.datetime.strptime(s, '%Y-%m-%d %H:%M:%S')
 turns=cheap=steps=dones=dl_kills=exhausted=hard=transient=timeout=0
+review_pass=review_fail=milestone_complete=0
 wasted=0.0; cur_ts=None; benched_ts=None
 tier_counts={}; model_counts={}; durations=[]
 with open(path, encoding='utf-8', errors='replace') as fh:
@@ -174,7 +175,10 @@ with open(path, encoding='utf-8', errors='replace') as fh:
             dl_kills+=1
             if cur_ts is not None: wasted+=(ts-cur_ts).total_seconds()
             continue
-        if 'step complete' in rest: steps+=1
+        if 'review-pass' in rest: review_pass+=1
+        elif 'review-fail' in rest: review_fail+=1
+        elif 'milestone-complete' in rest: milestone_complete+=1
+        elif 'step complete' in rest: steps+=1
         elif rest.startswith('agent signaled'): dones+=1
         elif 'EXHAUSTED' in rest: exhausted+=1
         elif 'HARD ERROR' in rest: hard+=1
@@ -198,5 +202,8 @@ if model_counts:
 if durations:
     avg=sum(durations)/len(durations); mx=max(durations)
     print(f"turn duration         : avg={avg:.0f}s max={mx}s")
+if milestone_complete or review_pass or review_fail:
+    print(f"milestones completed  : {milestone_complete}")
+    print(f"review verdicts       : pass={review_pass} fail={review_fail}")
 PY
 }

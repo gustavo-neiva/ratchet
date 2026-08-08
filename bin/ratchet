@@ -133,6 +133,53 @@ $body" >>"$LOOP_LOG" 2>&1; then
   fi
 }
 
+# ----------------------------- per-task session resume helpers -------------
+# save_last_task TASKID STATUS -> writes .ratchet/last_task.state
+save_last_task() {
+  local taskid="$1" status="$2"
+  mkdir -p "$REPO_DIR/.ratchet"
+  printf '%s\t%s\n' "$taskid" "$status" > "$REPO_DIR/.ratchet/last_task.state"
+}
+
+# should_resume_task CURRENT_TASKID -> sets RESUME_SESSION=1 and SESSION_ID if appropriate
+should_resume_task() {
+  local current_taskid="$1"
+  local state_file="$REPO_DIR/.ratchet/last_task.state"
+  
+  # Fall back to ephemeral for "?" task IDs (no ID)
+  [ "$current_taskid" = "?" ] && return 1
+  
+  # No previous state -> first attempt, stay ephemeral
+  [ ! -f "$state_file" ] && return 1
+  
+  local last_taskid last_status
+  read -r last_taskid last_status < "$state_file" || return 1
+  
+  # Different task -> ephemeral
+  [ "$current_taskid" != "$last_taskid" ] && return 1
+  
+  # Same task, but last turn was not a retry-worthy failure -> ephemeral
+  case "$last_status" in
+    timeout|transient) 
+      # Warm retry: same task, retriable failure -> resume
+      RESUME_SESSION=1
+      SESSION_ID="ratchet-task-${current_taskid}"
+      return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# clear_task_session TASKID -> removes the per-task session files
+clear_task_session() {
+  local taskid="$1"
+  [ "$taskid" = "?" ] && return 0
+  local session_id="ratchet-task-${taskid}"
+  local session_dir; session_dir=$(session_dir_for "$REPO_DIR")
+  if [ -d "$session_dir" ]; then
+    rm -f "${session_dir}/"*"_${session_id}.jsonl" 2>/dev/null
+  fi
+}
+
 # wait_for_merge BRANCH -> poll the PR until merged/closed/timeout (T3.2)
 # Returns: 0=merged+ff'd, 1=closed, 2=manual mode (no gh/origin), 3=timeout.
 # Emits frozen log line `merge-wait | pr=<branch> | state=<state>` on state changes only.

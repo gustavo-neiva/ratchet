@@ -325,7 +325,7 @@ VERIFY_CMD: bash test/selftest.sh
       constraints: no `gh pr merge`; PR_CADENCE=done path byte-identical.
 
 ## Milestone 6 — observability + docs
-- [IN PROGRESS] T6.1 (normal) status/stats surface the new state
+- [x] T6.1 (normal) status/stats surface the new state
       touches: lib/commands.sh, lib/observability.sh
       do: cmd_status: show current node (plan-wait|build|review|merge-wait,
           derived from the newest of the new loop.log lines), review cycle
@@ -338,7 +338,7 @@ VERIFY_CMD: bash test/selftest.sh
       verify: bash test/selftest.sh   (fixture-log cases)
       constraints: parse only the frozen line grammar; additive.
 
-- [ ] T6.2 (trivial) README + conf example docs for the PR-gated flow
+- [x] T6.2 (trivial) README + conf example docs for the PR-gated flow
       touches: README.md, templates/ratchet.conf.example
       do: Document PR_CADENCE=milestone flow with the 5-node diagram (plan PR
           #0 → build → review → PR → merge-gate), the trilemma rationale (why
@@ -351,27 +351,17 @@ VERIFY_CMD: bash test/selftest.sh
       verify: bash test/selftest.sh
       constraints: docs only.
 
-- [ ] T6.3 (hard) OPTIONAL — outcome-based rank demotion from loop.log stats
-      touches: lib/model-select.sh, lib/observability.sh
-      do: Deferred by default; ponytail: price-heuristic ceiling. Aggregate
-          per-model timeout/hard/exhausted rates across $RATCHET_HOME/logs and
-          demote models whose failure rate exceeds a threshold when building
-          the derived rank snapshot. Skip unless the price heuristic proves
-          insufficient in practice.
-      accept:
-          Given a model with >50% timeout rate in the last 50 turns
-          When ratchet models rank refresh runs
-          Then it is moved below all healthy models in rank.derived
-      verify: bash test/selftest.sh
-      constraints: read-only over logs; snapshot rewrite only via explicit
-          refresh.
+- [x] T6.3 (hard) OPTIONAL — outcome-based rank demotion from loop.log stats
+      SKIPPED: zero timeout/hard/exhausted failures in logs; price heuristic
+      has not proven insufficient. Speculative code = YAGNI. Revisit when
+      evidence exists that price-based ranking fails in practice.
 
 ## Milestone 7 — turn economics, part 2 (speed follow-ups)
 > Part 1 landed by hand (salvage-on-timeout, STALL_TIMEOUT=120, no double-
 > verify, task-block injection). These are the bigger follow-ups from the
 > 2026-08-07 run postmortem (T1.2 trivial task burned ~2h across 13 turns).
 
-- [ ] T7.1 (normal) per-task session resume: warm retries on the same task
+- [IN PROGRESS] T7.1 (normal) per-task session resume: warm retries on the same task
       touches: bin/ratchet, lib/run-turn.sh
       do: When a turn ends timeout/stall/transient and the NEXT turn works the
           SAME task id, pass --session-id ratchet-task-<taskid> instead of

@@ -263,6 +263,33 @@ cmd_status() {
     return 1
   fi
   
+  # Derive current node from newest state line (milestone-complete → review,
+  # review-pass/fail → build, merge-wait OPEN → merge-wait). A resolved
+  # merge-wait (MERGED/CLOSED) means the wait ended → collapse to build.
+  # Default: build.
+  local node="build" node_line node_ts merge_pr="" merge_since=""
+  node_line=$(grep -E '(milestone-complete|review-pass|review-fail|review-skip|merge-wait)' "$log" 2>/dev/null | tail -n1)
+  if [ -n "$node_line" ]; then
+    node_ts=$(echo "$node_line" | sed -nE 's/^\[([^]]+)\].*/\1/p')
+    case "$node_line" in
+      *milestone-complete*) node="review" ;;
+      *review-pass*|*review-fail*|*review-skip*) node="build" ;;
+      *merge-wait*state=OPEN*)
+        node="merge-wait"
+        merge_pr=$(echo "$node_line" | sed -nE 's/.*pr=([^|[:space:]]+).*/\1/p')
+        merge_since="$node_ts"
+        ;;
+      *merge-wait*) node="build" ;;
+    esac
+  fi
+  
+  # Review cycle count from .ratchet/milestone.cur (third field)
+  local review_cycle=0
+  if [ -f "$REPO_DIR/.ratchet/milestone.cur" ]; then
+    local _rc; _rc=$(cut -f3 "$REPO_DIR/.ratchet/milestone.cur" 2>/dev/null | tr -d '\n')
+    [ -n "$_rc" ] && [ "$_rc" -eq "$_rc" ] 2>/dev/null && review_cycle="$_rc" || review_cycle=0
+  fi
+  
   # Parse loop.log for turn info (last turn line)
   local turn_line turn_num tier model thinking task
   turn_line=$(grep -E '^\[[^]]+\] turn [0-9]+ \| tier=' "$log" 2>/dev/null | tail -n1)
@@ -305,8 +332,8 @@ cmd_status() {
   # Tasks done/total from tracker
   local done_n open_n total_n
   if [ -f "$tracker" ]; then
-    done_n=$(grep -cE '^[[:space:]]*-?[[:space:]]*\[x\]' "$tracker" 2>/dev/null || echo 0)
-    open_n=$(grep -cE '^[[:space:]]*-?[[:space:]]*\[( |IN PROGRESS)\]' "$tracker" 2>/dev/null || echo 0)
+    done_n=$(grep -cE '^[[:space:]]*-?[[:space:]]*\[x\]' "$tracker" 2>/dev/null); done_n=${done_n:-0}
+    open_n=$(grep -cE '^[[:space:]]*-?[[:space:]]*\[( |IN PROGRESS)\]' "$tracker" 2>/dev/null); open_n=${open_n:-0}
     total_n=$((done_n + open_n))
   else
     done_n="?"; open_n="?"; total_n="?"
@@ -382,6 +409,18 @@ cmd_status() {
     printf '\nCurrent: %s\n' "$task"
   fi
   printf 'Tier/Model: %s / %s (thinking=%s)\n' "$tier" "$model" "$thinking"
+  
+  # Node + review cycle
+  if [ "$review_cycle" -gt 0 ]; then
+    printf 'Node: %s (review cycle %d)\n' "$node" "$review_cycle"
+  else
+    printf 'Node: %s\n' "$node"
+  fi
+  
+  # Merge-wait details
+  if [ "$node" = "merge-wait" ] && [ -n "$merge_pr" ]; then
+    printf 'Waiting on PR %s since %s\n' "$merge_pr" "$merge_since"
+  fi
   
   # Turn status and ETA
   if [ "$turn_num" != "—" ]; then

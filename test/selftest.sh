@@ -1127,6 +1127,97 @@ else
   fail "status did not show 'not running': $status_out2"
 fi
 
+# (c) status + stats with new state lines (milestone-complete, review-pass, merge-wait)
+tmp_state="$(mktemp -d)"
+mkdir -p "$tmp_state/logs/state-project" "$tmp_state/.ratchet"
+cat > "$tmp_state/logs/state-project/loop.log" <<'STATEEOF'
+[2026-01-01 10:00:00] ratchet START
+[2026-01-01 10:00:01] turn 1 | tier=build | model=fake/model | thinking=medium | task=T1.1 task one
+[2026-01-01 10:00:10] turn 1 end | class=step | took=9s | task=T1.1
+[2026-01-01 10:00:11] milestone-complete | m=Milestone 1
+[2026-01-01 10:00:12] turn 2 | tier=review | model=fake/reviewer | thinking=high | task=review Milestone 1
+[2026-01-01 10:00:25] turn 2 end | class=step | took=13s
+[2026-01-01 10:00:25] review-pass | m=Milestone 1
+[2026-01-01 10:00:26] merge-wait | pr=ratchet/m-milestone-1 | state=OPEN
+[2026-01-01 10:05:26] merge-wait | pr=ratchet/m-milestone-1 | state=MERGED
+STATEEOF
+
+cat > "$tmp_state/PLAN.md" <<'PLANEOF'
+# State Test Plan
+## Milestone 1 — Done
+- [x] T1.1 (normal) task one
+## Milestone 2 — Current
+- [IN PROGRESS] T2.1 (normal) task two
+PLANEOF
+
+# milestone.cur: name<TAB>base-sha<TAB>cycle-count
+printf 'Milestone 2\t1234567\t2\n' > "$tmp_state/.ratchet/milestone.cur"
+
+REPO_DIR="$tmp_state"
+TRACKER_FILE="PLAN.md"
+LOOP_LOG="$tmp_state/logs/state-project/loop.log"
+LOG_DIR="$tmp_state/logs/state-project"
+TURN_OUT="$tmp_state/logs/state-project/last_turn.out"
+touch "$TURN_OUT"
+
+state_out="$(cmd_status 2>&1)"
+if printf '%s' "$state_out" | grep -q 'Node: build'; then
+  ok "status shows current node (build after review-pass)"
+else
+  fail "status missing node: $state_out"
+fi
+if printf '%s' "$state_out" | grep -q 'review cycle 2'; then
+  ok "status shows review cycle count from milestone.cur"
+else
+  fail "status missing review cycle: $state_out"
+fi
+
+# Test merge-wait node
+cat > "$tmp_state/logs/state-project/loop.log" <<'WAITEOF'
+[2026-01-01 10:00:00] ratchet START
+[2026-01-01 10:00:26] merge-wait | pr=ratchet/m-test | state=OPEN
+WAITEOF
+state_out2="$(cmd_status 2>&1)"
+if printf '%s' "$state_out2" | grep -q 'Node: merge-wait'; then
+  ok "status shows merge-wait node"
+else
+  fail "status missing merge-wait node: $state_out2"
+fi
+if printf '%s' "$state_out2" | grep -q 'Waiting on PR ratchet/m-test since 2026-01-01 10:00:26'; then
+  ok "status shows PR wait details"
+else
+  fail "status missing PR wait details: $state_out2"
+fi
+
+# Test stats with new lines
+cat > "$tmp_state/logs/state-project/loop.log" <<'STATSEOF'
+[2026-01-01 10:00:00] ratchet START
+[2026-01-01 10:00:01] turn 1 | tier=build | model=fake/model | thinking=medium | task=T1.1
+[2026-01-01 10:00:10] turn 1 end | class=step | took=9s
+[2026-01-01 10:00:10] milestone-complete | m=Milestone 1
+[2026-01-01 10:00:11] turn 2 | tier=review | model=fake/reviewer | thinking=high | task=review
+[2026-01-01 10:00:20] turn 2 end | class=step | took=9s
+[2026-01-01 10:00:20] review-pass | m=Milestone 1
+[2026-01-01 10:00:21] milestone-complete | m=Milestone 2
+[2026-01-01 10:00:22] turn 3 | tier=review | model=fake/reviewer | thinking=high | task=review
+[2026-01-01 10:00:30] turn 3 end | class=step | took=8s
+[2026-01-01 10:00:30] review-fail | m=Milestone 2
+STATSEOF
+
+stats_out="$(cmd_stats 2>&1)"
+if printf '%s' "$stats_out" | grep -q 'milestones completed.*: 2'; then
+  ok "stats counts milestone-complete lines"
+else
+  fail "stats missing milestone count: $stats_out"
+fi
+if printf '%s' "$stats_out" | grep -q 'review verdicts.*pass=1 fail=1'; then
+  ok "stats counts review-pass/fail lines"
+else
+  fail "stats missing review counts: $stats_out"
+fi
+
+rm -rf "$tmp_state"
+
 echo ""
 echo "== suite 17: FANOUT contract key (env-signal gating; extensions always on) =="
 # Extensions ALWAYS load (the OAuth-auth extension is one) — --no-extensions must

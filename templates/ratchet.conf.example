@@ -64,6 +64,18 @@ DONE_TOKEN=ALL_DONE
 # PR size soft warning threshold (changed lines). Default: 400. Warning only, never blocks.
 #PR_SOFT_MAX_LINES=400
 
+# Human-notify command (PR-gated flow). NOT recognized here — ratchet rejects it
+# as an unknown key to keep an attacker-controlled repo conf from running a
+# command. Set it ONLY in the trusted, sourced GLOBAL conf (~/.ratchet/conf):
+#   NOTIFY_CMD='afplay /System/Library/Sounds/Glass.aiff'        # macOS sound
+#   NOTIFY_CMD='osascript -e "display notification \"$1\" title ratchet"'  # macOS banner
+#   NOTIFY_CMD='notify-send ratchet "$1"'                        # Linux
+
+# Derived rank snapshot: frozen on first use so tiers don't reshuffle mid-
+# project on catalog churn. Inspect / force a refresh:
+#   ratchet models rank           # show effective rank (explicit or derived)
+#   ratchet models rank refresh   # re-derive from live pi + models.dev caches
+#
 # Tunables (uncomment to override defaults):
 #TURN_TIMEOUT=1800
 # Kill a turn whose (streaming) output stops growing this long — hung-request
