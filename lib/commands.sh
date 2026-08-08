@@ -196,6 +196,17 @@ cmd_plan() {
   local dir="$1"
   emit "ratchet plan: $dir (PLAN tier — ONE turn, then STOP for review)"
 
+  plan_turn "$dir"
+
+  emit_plan_review_stop "$dir" "$TRACKER_FILE" \
+    "  HUMAN: review $dir/$TRACKER_FILE before running the loop." \
+    "  Edit the plan (Milestone 0 + tags), then: ratchet doctor $dir && ratchet run $dir"
+}
+
+# plan_turn DIR -> run ONE plan turn (core shared by cmd_plan and auto-plan in main).
+# Sets up plan tier, runs the turn, commits tracker + LEARNINGS.md only.
+plan_turn() {
+  local dir="$1"
   # finalize tracker (auto-detect if conf left it empty)
   TRACKER_FILE="${TRACKER_FILE:-$(detect_tracker_file "$dir")}"
   [ -n "$TRACKER_FILE" ] || TRACKER_FILE="PLAN.md"
@@ -219,10 +230,6 @@ cmd_plan() {
   show_excerpt
 
   plan_commit "$dir"
-
-  emit_plan_review_stop "$dir" "$TRACKER_FILE" \
-    "  HUMAN: review $dir/$TRACKER_FILE before running the loop." \
-    "  Edit the plan (Milestone 0 + tags), then: ratchet doctor $dir && ratchet run $dir"
 }
 
 # plan_commit DIR -> commit ONLY the tracker + LEARNINGS.md from a plan turn.

@@ -214,7 +214,7 @@ VERIFY_CMD: bash test/selftest.sh
           ready, untagged→not ready, all-done→ready)
       constraints: pure grep/sed/awk; no state.
 
-- [IN PROGRESS] T4.2 (hard) auto-plan → branch → PR #0 → merge-gate in the run path
+- [x] T4.2 (hard) auto-plan → branch → PR #0 → merge-gate in the run path
       touches: bin/ratchet, lib/commands.sh
       do: In main(), when PR_CADENCE=milestone and ! plan_is_ready: create
           branch ratchet/plan off the default branch, run ONE plan turn
@@ -241,7 +241,7 @@ VERIFY_CMD: bash test/selftest.sh
 ## Milestone 5 — milestone branches, review turn, PR per milestone
 > The bounded context for a PR = one milestone (planner-sized, ≤~400 lines).
 
-- [ ] T5.1 (normal) milestone branch lifecycle
+- [IN PROGRESS] T5.1 (normal) milestone branch lifecycle
       touches: bin/ratchet
       do: When PR_CADENCE=milestone, before the first turn of each milestone
           (detect: current milestone name differs from .ratchet/milestone.cur,

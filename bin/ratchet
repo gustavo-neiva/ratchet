@@ -300,6 +300,51 @@ main() {
 
   cd "$REPO_DIR" || die "cannot cd into $REPO_DIR"
 
+  # Auto-plan for PR_CADENCE=milestone: if plan not ready, branch + plan turn + PR #0 + merge-gate
+  if [ "${PR_CADENCE:-done}" = "milestone" ] && ! plan_is_ready; then
+    emit "auto-plan: tracker not ready, running plan turn on ratchet/plan branch ..."
+    # Detect default branch
+    local default_branch; default_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+    [ -n "$default_branch" ] || default_branch="main"
+    # Create and checkout ratchet/plan branch
+    git checkout -b ratchet/plan "$default_branch" >>"$LOOP_LOG" 2>&1 || die "failed to create ratchet/plan branch"
+    # Run ONE plan turn (shared helper from lib/commands.sh)
+    plan_turn "$REPO_DIR"
+    # Push the plan branch
+    if git remote get-url origin >/dev/null 2>&1; then
+      emit "pushing ratchet/plan ..."
+      if ! git push -u origin ratchet/plan >>"$LOOP_LOG" 2>&1; then
+        notify_human "auto-plan: git push failed (see $LOOP_LOG) — push ratchet/plan manually and merge the PR"
+        exit 2
+      fi
+    fi
+    # Open PR #0
+    if command -v gh >/dev/null 2>&1 && git remote get-url origin >/dev/null 2>&1; then
+      local repo_name; repo_name=$(basename "$REPO_DIR")
+      local pr_body; pr_body=$(git diff "${default_branch}..HEAD" -- "$TRACKER_FILE" | grep '^+' | grep -v '^+++' | sed 's/^+//')
+      emit "opening PR #0 (plan review) ..."
+      if gh pr create --base "$default_branch" --title "ratchet plan: $repo_name" \
+           --body "Plan turn output:
+
+$pr_body" >>"$LOOP_LOG" 2>&1; then
+        emit "PR #0 opened — waiting for merge ..."
+      else
+        emit "gh pr create failed (see $LOOP_LOG)"
+        exit 1
+      fi
+    else
+      notify_human "auto-plan: merge ratchet/plan PR manually (no gh/origin)"
+      exit 2
+    fi
+    # Wait for merge
+    if ! wait_for_merge "ratchet/plan"; then
+      emit "auto-plan: merge wait failed or PR closed — stopping."
+      exit 1
+    fi
+    emit "auto-plan: PR #0 merged, continuing into build loop ..."
+    # No emit_plan_review_stop in this path — PR merge WAS the review
+  fi
+
   # Write PID file (for `ratchet status` to check if the loop is alive)
   echo $$ > "$LOG_DIR/loop.pid"
 

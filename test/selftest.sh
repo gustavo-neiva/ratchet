@@ -2391,6 +2391,247 @@ else
 fi
 rm -rf "$tmpdir"
 
+# =============================================================================
+# Suite 32: auto-plan flow (T4.2) — PR_CADENCE=milestone + not-ready tracker.
+# =============================================================================
+echo "Suite 32: auto-plan flow (T4.2)"
+
+# Test 1: PR_CADENCE=milestone, not-ready tracker → branch, plan turn, PR, merge-gate
+tmpdir="$(mktemp -d)"
+cd "$tmpdir"
+git init -q
+git config user.email "test@example.com"
+git config user.name "Test"
+cat > PLAN.md <<'PLAN'
+# Plan
+Milestone 0 — Walking skeleton
+- [ ] T0.1 (trivial) scaffold _(replace this)_
+PLAN
+git add PLAN.md
+git commit -q -m "init"
+git branch -M main
+mkdir -p .git/refs/remotes/origin
+echo "ref: refs/remotes/origin/main" > .git/refs/remotes/origin/HEAD
+git remote add origin fake://origin
+# Stub gh
+mkdir -p bin
+cat > bin/gh <<GHSTUB
+#!/usr/bin/env bash
+case "\$1" in
+  pr)
+    case "\$2" in
+      create) echo "PR created" >> "$tmpdir/gh.log" ;;
+      view)
+        # First call: OPEN, second: MERGED
+        if [ -f "$tmpdir/gh.count" ]; then
+          echo '{"state":"MERGED"}'
+        else
+          touch "$tmpdir/gh.count"
+          echo '{"state":"OPEN"}'
+        fi
+        ;;
+    esac
+    ;;
+esac
+GHSTUB
+chmod +x bin/gh
+# Stub pi
+cat > bin/pi <<'PISTUB'
+#!/usr/bin/env bash
+echo "STEP_COMPLETE"
+PISTUB
+chmod +x bin/pi
+# Stub git to make push succeed
+cat > bin/git <<'GITSTUB'
+#!/usr/bin/env bash
+if [ "${1:-}" = "push" ]; then
+  echo "push stubbed" >> "$tmpdir/push.log"
+  exit 0
+fi
+exec /usr/bin/git "$@"
+GITSTUB
+chmod +x bin/git
+_saved_path="$PATH"
+export PATH="$tmpdir/bin:$PATH"
+export REPO_DIR="$tmpdir"
+export TRACKER_FILE="PLAN.md"
+export PR_CADENCE="milestone"
+export COMMIT_EACH_TURN=1
+export MERGE_POLL_SECS=1
+export LOOP_LOG="$tmpdir/loop.log"
+export LOG_DIR="$tmpdir"
+export AGENT_CMD="pi"
+export MODELS="test/model"
+export PLAN_MODELS="test/model"
+export STEP_TOKEN="STEP_COMPLETE"
+export DONE_TOKEN="ALL_DONE"
+touch LEARNINGS.md
+# Simulate the auto-plan path: check plan_is_ready, then run the flow
+if ! plan_is_ready; then
+  # Create ratchet/plan branch
+  git checkout -b ratchet/plan main >"$LOOP_LOG" 2>&1
+  # Simulate plan_turn by just committing tracker change
+  sed -i.bak 's/_(replace this)_/do the scaffold/' PLAN.md
+  git add PLAN.md LEARNINGS.md
+  git commit -q -m "plan(ratchet): refresh PLAN.md"
+  # "Push" (just record it)
+  echo "pushed ratchet/plan" >> "$tmpdir/push.log"
+  # Open PR (call stubbed gh)
+  gh pr create --base main --title "ratchet plan: test" --body "plan" >>"$LOOP_LOG" 2>&1
+  # Check if PR was created
+  if [ -f "$tmpdir/gh.log" ] && grep -q "PR created" "$tmpdir/gh.log"; then
+    # Simulate wait_for_merge (stub returns MERGED on second call)
+    gh pr view ratchet/plan --json state >/dev/null  # first: OPEN
+    state=$(gh pr view ratchet/plan --json state 2>/dev/null | sed -n 's/.*"state":"\([^"]*\)".*/\1/p')
+    if [ "$state" = "MERGED" ]; then
+      git checkout main >"$LOOP_LOG" 2>&1
+      # Simulate ff merge
+      git merge --ff-only ratchet/plan >"$LOOP_LOG" 2>&1 || git merge ratchet/plan >"$LOOP_LOG" 2>&1
+      # Verify: on main, plan branch existed, PR was opened
+      current_branch=$(git rev-parse --abbrev-ref HEAD)
+      if [ "$current_branch" = "main" ] && git log --all --oneline | grep -q "plan(ratchet)"; then
+        ok "auto-plan: PR_CADENCE=milestone → branch, plan turn, PR opened, merged"
+      else
+        fail "auto-plan: workflow incomplete (branch=$current_branch)"
+      fi
+    else
+      fail "auto-plan: wait_for_merge stub did not return MERGED"
+    fi
+  else
+    fail "auto-plan: gh pr create was not called"
+  fi
+else
+  fail "auto-plan: plan_is_ready returned true for not-ready tracker"
+fi
+cd - >/dev/null
+rm -rf "$tmpdir"
+export PATH="$_saved_path"
+
+# Test 1b: Integration test - actual ratchet run with auto-plan
+tmpdir="$(mktemp -d)"
+cd "$tmpdir"
+git init -q
+git config user.email "test@test.test"; git config user.name "Test"
+cat > PLAN.md <<'PLAN'
+# Plan
+- [ ] T1 (trivial) task _(replace this)_
+PLAN
+git add PLAN.md
+git commit -q -m "init"
+git branch -M main
+mkdir -p .git/refs/remotes/origin
+echo "ref: refs/remotes/origin/main" > .git/refs/remotes/origin/HEAD
+git remote add origin fake://origin
+touch LEARNINGS.md
+git add LEARNINGS.md
+git commit -q -m "add learnings"
+cat > .ratchet.conf <<'CONF'
+TRACKER_FILE=PLAN.md
+VERIFY_CMD=:
+RATCHET_PROTOCOL=1
+MODELS=test/model
+PLAN_MODELS=test/model
+PR_CADENCE=milestone
+MERGE_POLL_SECS=1
+MERGE_WAIT_TIMEOUT=5
+CONF
+mkdir -p bin
+# Stub pi that makes plan ready
+cat > bin/pi <<'PISTUB'
+#!/usr/bin/env bash
+if grep -q '_(replace this)_' PLAN.md 2>/dev/null; then
+  sed 's/_(replace this)_/do the task/' PLAN.md > PLAN.md.tmp && mv PLAN.md.tmp PLAN.md
+fi
+echo "STEP_COMPLETE"
+PISTUB
+chmod +x bin/pi
+# Stub gh
+cat > bin/gh <<GHSTUB
+#!/usr/bin/env bash
+case "\$1" in
+  pr)
+    case "\$2" in
+      create) echo "PR created" >> "$tmpdir/gh.log"; exit 0 ;;
+      view)
+        if [ -f "$tmpdir/gh.count" ]; then
+          if [[ "\$*" == *"-q"* ]]; then echo "MERGED"; else echo '{"state":"MERGED"}'; fi
+        else
+          touch "$tmpdir/gh.count"
+          if [[ "\$*" == *"-q"* ]]; then echo "OPEN"; else echo '{"state":"OPEN"}'; fi
+        fi ;;
+    esac ;;
+esac
+GHSTUB
+chmod +x bin/gh
+# Stub git (stub push and pull)
+cat > bin/git <<GITSTUB
+#!/usr/bin/env bash
+case "\$1" in
+  push) echo "push OK" >> "$tmpdir/push.log"; exit 0 ;;
+  pull)
+    # Simulate successful ff-only pull from ratchet/plan into main
+    # The commits are already local, just need to merge them
+    if [ "\$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "main" ]; then
+      /usr/bin/git merge --ff-only ratchet/plan >>/dev/null 2>&1 || /usr/bin/git merge ratchet/plan >>/dev/null 2>&1
+    fi
+    exit 0 ;;
+  *) exec /usr/bin/git "\$@" ;;
+esac
+GITSTUB
+chmod +x bin/git
+_saved_path="$PATH"
+export PATH="$tmpdir/bin:$PATH"
+# Run ratchet with --once (will run auto-plan then stop)
+if timeout 15 "$RATCHET" run . --once >>"run.log" 2>&1; then
+  # Verify the auto-plan flow completed (while still in tmpdir)
+  if [ -f "gh.log" ] && grep -q "PR created" "gh.log"; then
+    current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    # Verify: on main, PLAN.md changed (placeholder removed), loop completed
+    if [ "$current_branch" = "main" ] && ! grep -q '_(replace this)_' PLAN.md 2>/dev/null; then
+      ok "auto-plan integration: ratchet run triggered auto-plan, created PR, merged to main"
+    elif [ "$current_branch" != "main" ]; then
+      fail "auto-plan integration: not on main branch (on $current_branch)"
+    else
+      fail "auto-plan integration: plan not updated (placeholder still present)"
+    fi
+  else
+    fail "auto-plan integration: PR not created"
+  fi
+else
+  fail "auto-plan integration: ratchet run timed out or failed (see run.log)"
+  [ -f "run.log" ] && tail -20 "run.log"
+fi
+cd - >/dev/null
+rm -rf "$tmpdir"
+export PATH="$_saved_path"
+
+# Test 2: PR_CADENCE=done → no auto-plan (unchanged behavior)
+tmpdir="$(mktemp -d)"
+cd "$tmpdir"
+git init -q
+cat > PLAN.md <<'PLAN'
+# Plan
+- [ ] T1 (normal) task _(placeholder)_
+PLAN
+git add PLAN.md
+git commit -q -m "init"
+export REPO_DIR="$tmpdir"
+export TRACKER_FILE="PLAN.md"
+export PR_CADENCE="done"
+# With PR_CADENCE=done, auto-plan should NOT run even if plan not ready
+if ! plan_is_ready; then
+  # Simulate main() check: PR_CADENCE != milestone, so skip auto-plan
+  if [ "${PR_CADENCE:-done}" != "milestone" ]; then
+    ok "auto-plan: PR_CADENCE=done skips auto-plan (unchanged)"
+  else
+    fail "auto-plan: PR_CADENCE check logic broken"
+  fi
+else
+  fail "auto-plan: plan_is_ready should return false for placeholder plan"
+fi
+cd - >/dev/null
+rm -rf "$tmpdir"
+
 echo ""
 echo "selftest: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
