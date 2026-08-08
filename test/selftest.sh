@@ -32,7 +32,7 @@ ok()   { printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
 fail() { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 
 # stubs so session-sanitize.sh can be sourced standalone
-emit() { :; }
+emit() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "${LOOP_LOG:-/dev/null}"; }
 vlog() { :; }
 LOG_DIR="$(mktemp -d)"
 
@@ -2051,6 +2051,293 @@ rm -f "$tmpconf"
 NOTIFY_CMD=""
 notify_human "nothing to run" && ok "notify_human: no-op when NOTIFY_CMD unset"
 unset NOTIFY_CMD
+
+# =============================================================================
+# Suite 30: wait_for_merge (T3.2) — poll PR until merged/closed/timeout.
+# =============================================================================
+echo "Suite 30: wait_for_merge (T3.2)"
+
+# Define wait_for_merge inline (from bin/ratchet). emit + notify_human already
+# sourced from observability.sh above.
+wait_for_merge() {
+  local branch="$1" state="" prev_state="" elapsed=0 default_branch
+  # preflight: require gh + origin
+  if ! command -v gh >/dev/null 2>&1; then
+    notify_human "merge the PR: gh not found, manual mode"
+    return 2
+  fi
+  if ! git remote get-url origin >/dev/null 2>&1; then
+    notify_human "merge the PR: no origin remote, manual mode"
+    return 2
+  fi
+  # detect default branch
+  default_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+  [ -n "$default_branch" ] || default_branch="main"
+  while true; do
+    # poll PR state (gh 2.4.0: try -q, fall back to sed)
+    if state=$(gh pr view "$branch" --json state -q .state 2>/dev/null); then
+      :  # -q worked
+    elif state=$(gh pr view "$branch" --json state 2>/dev/null | sed -n 's/.*"state":"\([^"]*\)".*/\1/p'); then
+      :  # sed fallback worked
+    else
+      notify_human "merge the PR: gh pr view failed"
+      return 2
+    fi
+    # log state change only
+    if [ "$state" != "$prev_state" ] && [ -n "$state" ]; then
+      emit "merge-wait | pr=$branch | state=$state"
+      prev_state="$state"
+    fi
+    case "$state" in
+      MERGED)
+        git checkout "$default_branch" >>"$LOOP_LOG" 2>&1 || return 1
+        git pull --ff-only >>"$LOOP_LOG" 2>&1 || return 1
+        return 0
+        ;;
+      CLOSED)
+        notify_human "PR $branch was closed without merging"
+        return 1
+        ;;
+    esac
+    # timeout check
+    if [ "$elapsed" -ge "${MERGE_WAIT_TIMEOUT:-259200}" ]; then
+      notify_human "merge timeout (${MERGE_WAIT_TIMEOUT}s elapsed) on PR $branch"
+      emit "merge-wait timeout: ${MERGE_WAIT_TIMEOUT}s elapsed, stopping cleanly."
+      return 3
+    fi
+    sleep "${MERGE_POLL_SECS:-300}"
+    elapsed=$((elapsed + ${MERGE_POLL_SECS:-300}))
+  done
+}
+
+# Test 1: MERGED path — returns 0, checks out default branch, ff-only pull.
+tmpdir="$(mktemp -d)"
+mkdir -p "$tmpdir/.git/refs/remotes/origin" "$tmpdir/bin"
+cd "$tmpdir"
+git init -q
+git config user.name "test"
+git config user.email "test@test"
+printf 'ref: refs/remotes/origin/main\n' > .git/refs/remotes/origin/HEAD
+touch file; git add file; git commit -qm "init"
+git branch -M main
+git checkout -q -b feature-branch
+git remote add origin fake://origin
+# stub gh that returns OPEN once, then MERGED
+cat > bin/gh <<'GHSTUB'
+#!/usr/bin/env bash
+case "$*" in
+  *"--json state -q .state"*|*"--json state"*)
+    marker="$PWD/.gh_call_count"
+    count=$(cat "$marker" 2>/dev/null || echo 0)
+    count=$((count + 1))
+    echo "$count" > "$marker"
+    if [ "$count" -eq 1 ]; then
+      if [[ "$*" == *"-q"* ]]; then echo "OPEN"; else echo '{"state":"OPEN"}'; fi
+    else
+      if [[ "$*" == *"-q"* ]]; then echo "MERGED"; else echo '{"state":"MERGED"}'; fi
+    fi
+    ;;
+esac
+GHSTUB
+chmod +x bin/gh
+# stub git to succeed on checkout/pull
+cat > bin/git <<'GITSTUB'
+#!/usr/bin/env bash
+case "$1" in
+  checkout|pull) exit 0 ;;
+  *) exec /usr/bin/git "$@" ;;
+esac
+GITSTUB
+chmod +x bin/git
+export PATH="$tmpdir/bin:$PATH"
+export LOOP_LOG="$tmpdir/loop.log"
+export MERGE_POLL_SECS=1
+if wait_for_merge feature-branch; then
+  ok "wait_for_merge: returns 0 after MERGED"
+  if grep -q "merge-wait | pr=feature-branch | state=OPEN" "$tmpdir/loop.log" && \
+     grep -q "merge-wait | pr=feature-branch | state=MERGED" "$tmpdir/loop.log"; then
+    ok "wait_for_merge: emitted merge-wait log lines on state changes"
+  else
+    fail "wait_for_merge: missing merge-wait log lines"
+  fi
+else
+  fail "wait_for_merge: returned non-zero for MERGED path"
+fi
+cd - >/dev/null
+rm -rf "$tmpdir"
+
+# Test 2: CLOSED path — returns 1, emits HUMAN NEEDED.
+tmpdir="$(mktemp -d)"
+mkdir -p "$tmpdir/.git/refs/remotes/origin" "$tmpdir/bin"
+cd "$tmpdir"
+git init -q
+printf 'ref: refs/remotes/origin/main\n' > .git/refs/remotes/origin/HEAD
+git remote add origin fake://origin
+cat > bin/gh <<'GHSTUB'
+#!/usr/bin/env bash
+case "$*" in
+  *"--json state -q"*) echo "CLOSED" ;;
+  *"--json state"*) echo '{"state":"CLOSED"}' ;;
+esac
+GHSTUB
+chmod +x bin/gh
+cat > bin/git <<'GITSTUB'
+#!/usr/bin/env bash
+case "$1" in
+  remote) exit 0 ;;
+  *) exec /usr/bin/git "$@" ;;
+esac
+GITSTUB
+chmod +x bin/git
+export PATH="$tmpdir/bin:$PATH"
+export LOOP_LOG="$tmpdir/loop.log"
+wait_for_merge closed-branch
+rc=$?
+if [ "$rc" -eq 1 ] && grep -q "HUMAN NEEDED" "$tmpdir/loop.log"; then
+  ok "wait_for_merge: returns 1 and emits HUMAN NEEDED for CLOSED"
+else
+  fail "wait_for_merge: wrong exit code ($rc) or no HUMAN NEEDED for CLOSED"
+fi
+cd - >/dev/null
+rm -rf "$tmpdir"
+
+# Test 3: timeout path — returns 3, emits HUMAN NEEDED + clean exit message.
+tmpdir="$(mktemp -d)"
+mkdir -p "$tmpdir/.git/refs/remotes/origin" "$tmpdir/bin"
+cd "$tmpdir"
+git init -q
+printf 'ref: refs/remotes/origin/main\n' > .git/refs/remotes/origin/HEAD
+git remote add origin fake://origin
+cat > bin/gh <<'GHSTUB'
+#!/usr/bin/env bash
+case "$*" in
+  *"--json state -q"*) echo "OPEN" ;;
+  *"--json state"*) echo '{"state":"OPEN"}' ;;
+esac
+GHSTUB
+chmod +x bin/gh
+cat > bin/git <<'GITSTUB'
+#!/usr/bin/env bash
+case "$1" in
+  remote) exit 0 ;;
+  *) exec /usr/bin/git "$@" ;;
+esac
+GITSTUB
+chmod +x bin/git
+export PATH="$tmpdir/bin:$PATH"
+export LOOP_LOG="$tmpdir/loop.log"
+export MERGE_POLL_SECS=1
+export MERGE_WAIT_TIMEOUT=1
+wait_for_merge timeout-branch
+rc=$?
+if [ "$rc" -eq 3 ] && grep -q "HUMAN NEEDED" "$tmpdir/loop.log" && \
+   grep -q "merge-wait timeout" "$tmpdir/loop.log"; then
+  ok "wait_for_merge: returns 3 and emits timeout messages"
+else
+  fail "wait_for_merge: wrong exit code ($rc) or missing timeout messages"
+fi
+cd - >/dev/null
+rm -rf "$tmpdir"
+
+# Test 4: no gh — returns 2 (manual mode), emits HUMAN NEEDED.
+tmpdir="$(mktemp -d)"
+mkdir -p "$tmpdir/.git"
+cd "$tmpdir"
+git init -q
+git remote add origin fake://origin
+OLD_PATH="$PATH"
+export PATH="/usr/bin:/bin"
+export LOOP_LOG="$tmpdir/loop.log"
+wait_for_merge no-gh
+rc=$?
+if [ "$rc" -eq 2 ] && grep -q "HUMAN NEEDED.*gh not found" "$tmpdir/loop.log"; then
+  ok "wait_for_merge: returns 2 (manual mode) when gh not found"
+else
+  fail "wait_for_merge: wrong exit code ($rc) or message for no gh"
+fi
+export PATH="$OLD_PATH"
+cd - >/dev/null
+rm -rf "$tmpdir"
+
+# Test 5: no origin — returns 2 (manual mode), emits HUMAN NEEDED.
+tmpdir="$(mktemp -d)"
+mkdir -p "$tmpdir/bin"
+cd "$tmpdir"
+git init -q
+cat > bin/gh <<'GHSTUB'
+#!/usr/bin/env bash
+echo "stub"
+GHSTUB
+chmod +x bin/gh
+export PATH="$tmpdir/bin:$PATH"
+export LOOP_LOG="$tmpdir/loop.log"
+wait_for_merge no-origin
+rc=$?
+if [ "$rc" -eq 2 ] && grep -q "HUMAN NEEDED.*no origin" "$tmpdir/loop.log"; then
+  ok "wait_for_merge: returns 2 (manual mode) when origin missing"
+else
+  fail "wait_for_merge: wrong exit code ($rc) or message for no origin"
+fi
+cd - >/dev/null
+rm -rf "$tmpdir"
+
+# =============================================================================
+# Suite 31: plan_is_ready (T4.1) — detect when tracker is ready.
+# =============================================================================
+echo "Suite 31: plan_is_ready (T4.1)"
+
+# Test 1: PLAN.seed.md → not ready (has placeholder markers despite tags)
+tmpdir="$(mktemp -d)"
+export REPO_DIR="$tmpdir"
+export TRACKER_FILE="PLAN.md"
+cp "$RR/templates/PLAN.seed.md" "$tmpdir/PLAN.md"
+if plan_is_ready; then
+  fail "plan_is_ready: PLAN.seed.md should return 1 (has placeholders)"
+else
+  ok "plan_is_ready: PLAN.seed.md returns 1 (has placeholders)"
+fi
+rm -rf "$tmpdir"
+
+# Test 2: this PLAN.md → ready (tagged tasks, no placeholders)
+tmpdir="$(mktemp -d)"
+export REPO_DIR="$tmpdir"
+cp "$RR/PLAN.md" "$tmpdir/PLAN.md"
+if plan_is_ready; then
+  ok "plan_is_ready: this PLAN.md returns 0 (tagged, no placeholders)"
+else
+  fail "plan_is_ready: this PLAN.md should return 0"
+fi
+rm -rf "$tmpdir"
+
+# Test 3: untagged checkboxes only → not ready
+tmpdir="$(mktemp -d)"
+export REPO_DIR="$tmpdir"
+cat > "$tmpdir/PLAN.md" <<'PLAN'
+# Plan
+- [ ] do something
+- [ ] do another thing
+PLAN
+if plan_is_ready; then
+  fail "plan_is_ready: untagged plan should return 1"
+else
+  ok "plan_is_ready: untagged plan returns 1"
+fi
+rm -rf "$tmpdir"
+
+# Test 4: all-done (only [x] tasks) → ready
+tmpdir="$(mktemp -d)"
+export REPO_DIR="$tmpdir"
+cat > "$tmpdir/PLAN.md" <<'PLAN'
+# Plan
+- [x] T1.1 (normal) completed task
+- [x] T1.2 (trivial) another done
+PLAN
+if plan_is_ready; then
+  ok "plan_is_ready: all-done plan returns 0"
+else
+  fail "plan_is_ready: all-done plan should return 0"
+fi
+rm -rf "$tmpdir"
 
 echo ""
 echo "selftest: $PASS passed, $FAIL failed"

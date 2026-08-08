@@ -163,7 +163,7 @@ VERIFY_CMD: bash test/selftest.sh
           from the parsed repo conf. Global conf is trusted (already sourced
           today).
 
-- [IN PROGRESS] T3.2 (hard) wait_for_merge: poll the PR until merged / closed / timeout
+- [x] T3.2 (hard) wait_for_merge: poll the PR until merged / closed / timeout
       touches: bin/ratchet (new function), lib/observability.sh
       do: `wait_for_merge BRANCH`: requires gh + origin (else notify_human and
           return 2 = manual mode: loop stops cleanly telling the human to merge
@@ -192,7 +192,7 @@ VERIFY_CMD: bash test/selftest.sh
 ## Milestone 4 — plan as PR #0 (full autonomy, no hard stops)
 > Every human decision is a merge button. Plan review included.
 
-- [ ] T4.1 (normal) plan_is_ready detector
+- [IN PROGRESS] T4.1 (normal) plan_is_ready detector
       touches: lib/tracker.sh
       do: `plan_is_ready()`: return 0 when the tracker has ≥1 open task line
           carrying an explicit (trivial|normal|hard) tag AND contains no

@@ -196,6 +196,22 @@ tracker_milestones() {
   ' "$file"
 }
 
+# plan_is_ready -> return 0 when tracker is ready (≥1 tagged open task, no placeholders),
+# else 1. A tracker with only [x] tasks is ready (nothing to plan). Untagged-only = not ready.
+plan_is_ready() {
+  local file="$REPO_DIR/$TRACKER_FILE"
+  [ -f "$file" ] || return 1
+  # Check for placeholder markers: _(..._) pattern, skip backtick-quoted examples
+  grep -v '`' "$file" | grep -qE '_\([^)]+\)_' && return 1
+  # All done (no open/inprogress tasks) = ready
+  if ! grep -qE '^[[:space:]]*-?[[:space:]]*\[([ ]|IN PROGRESS)\]' "$file"; then
+    return 0
+  fi
+  # Check for at least one open/inprogress task with a tag
+  grep -E '^[[:space:]]*-?[[:space:]]*\[([ ]|IN PROGRESS)\]' "$file" \
+    | grep -qE '\((trivial|normal|hard)[,)]'
+}
+
 # tracker_current_milestone -> echoes "name<TAB>idx<TAB>count<TAB>mdone<TAB>mtotal"
 # for the milestone containing the first open/IN PROGRESS task.
 # idx = 1-based position of the task within that milestone, count = total tasks in milestone.

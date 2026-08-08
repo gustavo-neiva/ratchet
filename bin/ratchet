@@ -133,6 +133,60 @@ $body" >>"$LOOP_LOG" 2>&1; then
   fi
 }
 
+# wait_for_merge BRANCH -> poll the PR until merged/closed/timeout (T3.2)
+# Returns: 0=merged+ff'd, 1=closed, 2=manual mode (no gh/origin), 3=timeout.
+# Emits frozen log line `merge-wait | pr=<branch> | state=<state>` on state changes only.
+wait_for_merge() {
+  local branch="$1" state="" prev_state="" elapsed=0 default_branch
+  # preflight: require gh + origin
+  if ! command -v gh >/dev/null 2>&1; then
+    notify_human "merge the PR: gh not found, manual mode"
+    return 2
+  fi
+  if ! git remote get-url origin >/dev/null 2>&1; then
+    notify_human "merge the PR: no origin remote, manual mode"
+    return 2
+  fi
+  # detect default branch
+  default_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+  [ -n "$default_branch" ] || default_branch="main"
+  while true; do
+    # poll PR state (gh 2.4.0: try -q, fall back to sed)
+    if state=$(gh pr view "$branch" --json state -q .state 2>/dev/null); then
+      :  # -q worked
+    elif state=$(gh pr view "$branch" --json state 2>/dev/null | sed -n 's/.*"state":"\([^"]*\)".*/\1/p'); then
+      :  # sed fallback worked
+    else
+      notify_human "merge the PR: gh pr view failed"
+      return 2
+    fi
+    # log state change only
+    if [ "$state" != "$prev_state" ] && [ -n "$state" ]; then
+      emit "merge-wait | pr=$branch | state=$state"
+      prev_state="$state"
+    fi
+    case "$state" in
+      MERGED)
+        git checkout "$default_branch" >>"$LOOP_LOG" 2>&1 || return 1
+        git pull --ff-only >>"$LOOP_LOG" 2>&1 || return 1
+        return 0
+        ;;
+      CLOSED)
+        notify_human "PR $branch was closed without merging"
+        return 1
+        ;;
+    esac
+    # timeout check
+    if [ "$elapsed" -ge "${MERGE_WAIT_TIMEOUT:-259200}" ]; then
+      notify_human "merge timeout (${MERGE_WAIT_TIMEOUT}s elapsed) on PR $branch"
+      emit "merge-wait timeout: ${MERGE_WAIT_TIMEOUT}s elapsed, stopping cleanly."
+      return 3
+    fi
+    sleep "${MERGE_POLL_SECS:-300}"
+    elapsed=$((elapsed + ${MERGE_POLL_SECS:-300}))
+  done
+}
+
 # ----------------------------- main ------------------------------------------
 main() {
   pre_scan "$@"
