@@ -345,6 +345,47 @@ $pr_body" >>"$LOOP_LOG" 2>&1; then
     # No emit_plan_review_stop in this path — PR merge WAS the review
   fi
 
+  # Milestone branch lifecycle for PR_CADENCE=milestone
+  if [ "${PR_CADENCE:-done}" = "milestone" ]; then
+    local minfo mname slug_name milestone_cur_file="${REPO_DIR}/.ratchet/milestone.cur"
+    minfo=$(tracker_current_milestone)
+    mname=$(printf '%s' "$minfo" | cut -f1)
+    
+    if [ -n "$mname" ]; then
+      local stored_mname="" stored_base_sha=""
+      if [ -f "$milestone_cur_file" ]; then
+        stored_mname=$(cut -f1 "$milestone_cur_file")
+        stored_base_sha=$(cut -f2 "$milestone_cur_file")
+      fi
+      
+      if [ "$mname" != "$stored_mname" ]; then
+        emit "milestone-start | m=$mname | prev=${stored_mname:-none}"
+        
+        # Get default branch
+        local default_branch; default_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+        [ -n "$default_branch" ] || default_branch="main"
+        
+        # Get current HEAD of default branch (local copy)
+        local base_sha; base_sha=$(git rev-parse "$default_branch" 2>/dev/null || git rev-parse HEAD)
+        
+        # Create slug from milestone name
+        slug_name=$(printf '%s' "$mname" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g')
+        local branch_name="ratchet/m-$slug_name"
+        
+        # Create and checkout branch off default branch HEAD
+        if ! git checkout -b "$branch_name" "$default_branch" >>"$LOOP_LOG" 2>&1; then
+          die "failed to create $branch_name"
+        fi
+        
+        # Record milestone name + base sha + cycle=0 + errors=0 in .ratchet/milestone.cur
+        mkdir -p "$(dirname "$milestone_cur_file")"
+        printf '%s\t%s\t0\t0\n' "$mname" "$base_sha" > "$milestone_cur_file"
+        
+        emit "milestone branch $branch_name created at $base_sha"
+      fi
+    fi
+  fi
+
   # Write PID file (for `ratchet status` to check if the loop is alive)
   echo $$ > "$LOG_DIR/loop.pid"
 
@@ -563,6 +604,74 @@ $(cat "$LOG_DIR/last_turn.note")"
         [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
         sleep "$backoff" ;;
     esac
+    
+    # Milestone-complete detection + review turn (PR_CADENCE=milestone only)
+    if [ "$COMMITTED_THIS_TURN" = 1 ] && [ "${PR_CADENCE:-done}" = "milestone" ]; then
+      local milestone_cur_file="${REPO_DIR}/.ratchet/milestone.cur"
+      if [ -f "$milestone_cur_file" ]; then
+        local stored_mname next_mname minfo
+        stored_mname=$(cut -f1 "$milestone_cur_file")
+        # Get the milestone of the first open/IN PROGRESS task (if any)
+        minfo=$(tracker_current_milestone)
+        next_mname=$(printf '%s' "$minfo" | cut -f1)
+        # Milestone is complete when: stored milestone exists, but next open task is in a DIFFERENT milestone (or no open tasks)
+        if [ -n "$stored_mname" ] && [ "$next_mname" != "$stored_mname" ]; then
+          emit "milestone-complete | m=$stored_mname"
+          # Read base sha, cycle counter, and error count from milestone.cur
+          local base_sha cycle_count review_errors
+          base_sha=$(cut -f2 "$milestone_cur_file" 2>/dev/null || echo "")
+          cycle_count=$(cut -f3 "$milestone_cur_file" 2>/dev/null || echo 0)
+          review_errors=$(cut -f4 "$milestone_cur_file" 2>/dev/null || echo 0)
+          cycle_count=${cycle_count:-0}
+          review_errors=${review_errors:-0}
+          
+          # Run ONE review turn with swapped tokens
+          local review_status
+          review_status=$(run_review_turn "$base_sha" "$stored_mname" "$cycle_count")
+          
+          case "$review_status" in
+            pass)
+              emit "review-pass | m=$stored_mname"
+              # Reset error count on pass
+              printf '%s\t%s\t%s\t0\n' "$stored_mname" "$base_sha" "$cycle_count" > "$milestone_cur_file"
+              # Proceed to T5.3 (PR step)
+              ;;
+            fail)
+              emit "review-fail | m=$stored_mname | cycle=$((cycle_count + 1))"
+              cycle_count=$((cycle_count + 1))
+              # Update cycle counter, reset error count
+              printf '%s\t%s\t%s\t0\n' "$stored_mname" "$base_sha" "$cycle_count" > "$milestone_cur_file"
+              # Commit tracker with injected tasks
+              if [ -d .git ]; then
+                git add -- "$TRACKER_FILE" 2>/dev/null || true
+                if ! git diff --cached --quiet 2>/dev/null; then
+                  git commit -q -m "review(ratchet): fix tasks from review cycle $cycle_count" 2>>"$LOOP_LOG" || true
+                  emit "  review-injected tasks committed"
+                fi
+              fi
+              # Check cycle bound
+              if [ "$cycle_count" -ge "${MAX_REVIEW_CYCLES:-2}" ]; then
+                notify_human "milestone $stored_mname exceeded MAX_REVIEW_CYCLES (${MAX_REVIEW_CYCLES:-2}) — review and fix manually"
+                emit "MAX_REVIEW_CYCLES exceeded — STOPPING for human review."
+                break
+              fi
+              # Loop back to build
+              ;;
+            error)
+              review_errors=$((review_errors + 1))
+              emit "review-skip | m=$stored_mname | reason=reviewer-error (${review_errors}/2)"
+              # Update error count in milestone.cur
+              printf '%s\t%s\t%s\t%s\n' "$stored_mname" "$base_sha" "$cycle_count" "$review_errors" > "$milestone_cur_file"
+              if [ "$review_errors" -ge 2 ]; then
+                emit "  review turn errors twice — proceeding (broken reviewer must not wedge pipeline)"
+                # Reset for next milestone
+                printf '%s\t%s\t%s\t0\n' "$stored_mname" "$base_sha" "$cycle_count" > "$milestone_cur_file"
+              fi
+              ;;
+          esac
+        fi
+      fi
+    fi
     
     # write last-turn note for next turn's prompt
     if [ "$COMMITTED_THIS_TURN" = 1 ]; then

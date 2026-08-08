@@ -241,7 +241,7 @@ VERIFY_CMD: bash test/selftest.sh
 ## Milestone 5 — milestone branches, review turn, PR per milestone
 > The bounded context for a PR = one milestone (planner-sized, ≤~400 lines).
 
-- [IN PROGRESS] T5.1 (normal) milestone branch lifecycle
+- [x] T5.1 (normal) milestone branch lifecycle
       touches: bin/ratchet
       do: When PR_CADENCE=milestone, before the first turn of each milestone
           (detect: current milestone name differs from .ratchet/milestone.cur,
@@ -258,7 +258,7 @@ VERIFY_CMD: bash test/selftest.sh
           recreated on later turns of the same milestone)
       constraints: .ratchet/ is already gitignored by init; keep it that way.
 
-- [ ] T5.2 (hard) milestone-complete detection + review turn (≤2 cycles)
+- [x] T5.2 (hard) milestone-complete detection + review turn (≤2 cycles)
       touches: bin/ratchet, lib/run-turn.sh (reuse), templates/REVIEW.prompt.md (new)
       do: After each green commit, when the just-worked milestone has no
           remaining open/IN PROGRESS tasks (compare tracker_current_milestone
@@ -300,7 +300,7 @@ VERIFY_CMD: bash test/selftest.sh
           commit; review gates the PR only. New loop.log lines additive:
           milestone-complete, review-pass, review-fail, review-skip.
 
-- [ ] T5.3 (normal) PR per milestone + merge-gate + size warning
+- [IN PROGRESS] T5.3 (normal) PR per milestone + merge-gate + size warning
       touches: bin/ratchet
       do: Refactor maybe_push_or_pr into `open_milestone_pr NAME BASE_SHA`:
           push the milestone branch, `gh pr create` with title

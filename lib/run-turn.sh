@@ -140,3 +140,53 @@ run_turn() {
   TURN_STATUS="$(classify_turn "$TURN_OUT" "$STEP_TOKEN" "$DONE_TOKEN" "$deadline" "$pi_json")"
   vlog "turn classified: $TURN_STATUS"
 }
+
+# run_review_turn BASE_SHA MILESTONE_NAME CYCLE_COUNT -> echoes "pass"|"fail"|"error"
+# Runs ONE read-only review turn with swapped tokens (STEP_TOKEN=REVIEW_PASS, DONE_TOKEN=REVIEW_FAIL)
+# so the existing classify_turn logic works unmodified: class step => pass, class done => fail.
+# Never strikes/benches the review model; errors return "error" to trigger skip policy.
+run_review_turn() {
+  local base_sha="$1" mname="$2" cycle="$3"
+  # Build review prompt: template + diff
+  local review_tpl="$RATCHET_ROOT/templates/REVIEW.prompt.md"
+  local diff_content
+  diff_content=$(git diff "${base_sha}..HEAD" 2>/dev/null || echo "<diff unavailable>")
+  local review_prompt
+  review_prompt=$(cat "$review_tpl")
+  review_prompt="$review_prompt
+
+\`\`\`diff
+$diff_content
+\`\`\`
+
+**Milestone**: $mname (review cycle $((cycle + 1)))
+**Tracker**: $TRACKER_FILE
+"
+  
+  # Swap tokens for this turn only
+  local saved_step="$STEP_TOKEN" saved_done="$DONE_TOKEN" saved_prompt="$PROMPT"
+  STEP_TOKEN="REVIEW_PASS"
+  DONE_TOKEN="REVIEW_FAIL"
+  PROMPT="$review_prompt"
+  
+  # Get review tier model (never strike/bench it)
+  local review_chain; review_chain=$(chain_for_tier review)
+  local review_model; review_model=$(echo "$review_chain" | awk -F, '{print $1}')
+  [ -n "$review_model" ] || review_model="${models_arr[0]:-}"
+  [ -n "$review_model" ] || { echo "error"; return; }
+  
+  # Run turn (reuses run_turn, which sets TURN_STATUS)
+  run_turn "$review_model" "normal"
+  
+  # Restore tokens and prompt
+  STEP_TOKEN="$saved_step"
+  DONE_TOKEN="$saved_done"
+  PROMPT="$saved_prompt"
+  
+  # Map TURN_STATUS to review verdict
+  case "$TURN_STATUS" in
+    step) echo "pass" ;;  # REVIEW_PASS token seen
+    done) echo "fail" ;;  # REVIEW_FAIL token seen
+    *) echo "error" ;;    # timeout, exhausted, hard, transient -> all "error"
+  esac
+}
