@@ -300,7 +300,7 @@ VERIFY_CMD: bash test/selftest.sh
           commit; review gates the PR only. New loop.log lines additive:
           milestone-complete, review-pass, review-fail, review-skip.
 
-- [IN PROGRESS] T5.3 (normal) PR per milestone + merge-gate + size warning
+- [x] T5.3 (normal) PR per milestone + merge-gate + size warning
       touches: bin/ratchet
       do: Refactor maybe_push_or_pr into `open_milestone_pr NAME BASE_SHA`:
           push the milestone branch, `gh pr create` with title
@@ -325,7 +325,7 @@ VERIFY_CMD: bash test/selftest.sh
       constraints: no `gh pr merge`; PR_CADENCE=done path byte-identical.
 
 ## Milestone 6 — observability + docs
-- [ ] T6.1 (normal) status/stats surface the new state
+- [IN PROGRESS] T6.1 (normal) status/stats surface the new state
       touches: lib/commands.sh, lib/observability.sh
       do: cmd_status: show current node (plan-wait|build|review|merge-wait,
           derived from the newest of the new loop.log lines), review cycle

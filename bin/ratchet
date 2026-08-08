@@ -187,6 +187,44 @@ wait_for_merge() {
   done
 }
 
+# open_milestone_pr NAME BASE_SHA -> push milestone branch, open PR, wait_for_merge
+open_milestone_pr() {
+  local mname="$1" base_sha="$2" body diffstat changed_lines first_subject verdict
+  local current_branch
+  current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "HEAD")
+  emit "pushing milestone branch $current_branch ..."
+  if ! git push >"$LOOP_LOG" 2>&1; then
+    emit "git push failed (see $LOOP_LOG) — branch left local."
+    return 1
+  fi
+  emit "pushed."
+  if ! command -v gh >/dev/null 2>&1 || ! git remote get-url origin >/dev/null 2>&1; then
+    emit "no gh / no origin — leaving the pushed branch for manual PR."
+    return 2
+  fi
+  # PR body: milestone tasks + diffstat + verdict
+  body="$(tracker_milestone_completed_list "$mname" | sed 's/^/- /')"
+  diffstat="$(git diff --stat "$base_sha"..HEAD)"
+  changed_lines=$(git diff --shortstat "$base_sha"..HEAD | awk '{print $4+$6}')
+  verdict=$(grep 'review-pass\|review-skip' "$LOOP_LOG" | tail -n1 || echo "")
+  # Large-PR warning
+  if [ "${changed_lines:-0}" -gt "${PR_SOFT_MAX_LINES:-800}" ]; then
+    emit "⚠ large PR: $changed_lines lines (soft limit: ${PR_SOFT_MAX_LINES:-800})"
+    body="⚠ large PR: $changed_lines changed lines\n\n$body"
+  fi
+  body="$body\n\n\`\`\`\n$diffstat\n\`\`\`"
+  [ -n "$verdict" ] && body="$body\n\n$verdict"
+  first_subject=$(tracker_milestone_completed_list "$mname" | head -n1 | sed -E 's/^\[x\][[:space:]]*//; s/\*\*//g')
+  emit "opening PR for milestone $mname ..."
+  if printf '%b' "$body" | gh pr create --title "ratchet $mname: $first_subject" --body-file - >>"$LOOP_LOG" 2>&1; then
+    emit "PR opened."
+  else
+    emit "gh pr create failed (see $LOOP_LOG)."
+    return 1
+  fi
+  wait_for_merge "$current_branch"
+}
+
 # ----------------------------- main ------------------------------------------
 main() {
   pre_scan "$@"
@@ -634,7 +672,7 @@ $(cat "$LOG_DIR/last_turn.note")"
               emit "review-pass | m=$stored_mname"
               # Reset error count on pass
               printf '%s\t%s\t%s\t0\n' "$stored_mname" "$base_sha" "$cycle_count" > "$milestone_cur_file"
-              # Proceed to T5.3 (PR step)
+              open_milestone_pr "$stored_mname" "$base_sha" || true
               ;;
             fail)
               emit "review-fail | m=$stored_mname | cycle=$((cycle_count + 1))"
@@ -666,6 +704,7 @@ $(cat "$LOG_DIR/last_turn.note")"
                 emit "  review turn errors twice — proceeding (broken reviewer must not wedge pipeline)"
                 # Reset for next milestone
                 printf '%s\t%s\t%s\t0\n' "$stored_mname" "$base_sha" "$cycle_count" > "$milestone_cur_file"
+                open_milestone_pr "$stored_mname" "$base_sha" || true
               fi
               ;;
           esac

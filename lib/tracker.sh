@@ -90,6 +90,25 @@ tracker_completed_list() {
     | sed -E 's/^[[:space:]]*-?[[:space:]]*//; s/\*\*//g'
 }
 
+# tracker_milestone_completed_list NAME -> [x] tasks under the named ## milestone
+tracker_milestone_completed_list() {
+  local mname="$1" file="$REPO_DIR/$TRACKER_FILE"
+  [ -f "$file" ] || return 0
+  awk -v target="$mname" '
+    /^## / {
+      name = $0; sub(/^## /, "", name)
+      in_target = (name == target) ? 1 : 0
+      next
+    }
+    in_target && /^[[:space:]]*-[[:space:]]*\[x\]/ {
+      line = $0
+      sub(/^[[:space:]]*-?[[:space:]]*/, "", line)
+      gsub(/\*\*/, "", line)
+      print line
+    }
+  ' "$file"
+}
+
 # tracker_task_block -> echoes the CURRENT task's full block: the task line
 # plus its indented continuation lines (do:/accept:/touches:...), up to the next
 # task line or heading. Injected into the turn prompt so ephemeral turns skip
