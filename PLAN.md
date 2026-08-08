@@ -192,7 +192,7 @@ VERIFY_CMD: bash test/selftest.sh
 ## Milestone 4 — plan as PR #0 (full autonomy, no hard stops)
 > Every human decision is a merge button. Plan review included.
 
-- [IN PROGRESS] T4.1 (normal) plan_is_ready detector
+- [x] T4.1 (normal) plan_is_ready detector
       touches: lib/tracker.sh
       do: `plan_is_ready()`: return 0 when the tracker has ≥1 open task line
           carrying an explicit (trivial|normal|hard) tag AND contains no
@@ -214,7 +214,7 @@ VERIFY_CMD: bash test/selftest.sh
           ready, untagged→not ready, all-done→ready)
       constraints: pure grep/sed/awk; no state.
 
-- [ ] T4.2 (hard) auto-plan → branch → PR #0 → merge-gate in the run path
+- [IN PROGRESS] T4.2 (hard) auto-plan → branch → PR #0 → merge-gate in the run path
       touches: bin/ratchet, lib/commands.sh
       do: In main(), when PR_CADENCE=milestone and ! plan_is_ready: create
           branch ratchet/plan off the default branch, run ONE plan turn
