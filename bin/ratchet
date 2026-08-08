@@ -602,7 +602,7 @@ $(cat "$LOG_DIR/last_turn.note")"
     local turn_start=$SECONDS
     run_turn "$model" "$tag"
     local turn_elapsed=$((SECONDS-turn_start))
-    emit "turn $turn end | class=$TURN_STATUS | took=${turn_elapsed}s | task=$(printf '%.20s' "${next_task:-?}")"
+    emit "turn $turn end | class=$TURN_STATUS | took=${turn_elapsed}s | exitcode=$TURN_EXIT_CODE | task=$(printf '%.20s' "${next_task:-?}")"
     
     # Save task state for next turn's resume decision
     save_last_task "$taskid" "$TURN_STATUS"

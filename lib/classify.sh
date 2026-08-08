@@ -40,11 +40,12 @@ _is_exhausted() {  # FILE JSON
   _err_scan_src "$1" "${2:-0}" | grep -qiE '(request failed: HTTP (429|503|529))|(auto_retry.{0,40}429)|(\\?"code\\?"[[:space:]]*:[[:space:]]*\\?"?130[2-8])|(rate_limit_error|overloaded_error)|(rate[ _-]?limit)|(quota)|(usage limit reached)|(insufficient.{0,30}(balance|quota|credit))|(daily.{0,15}(limit|quota))|(too many requests)|(exceed(ed|s)?.{0,15}(quota|limit|balance|rate))' 2>/dev/null
 }
 
-# Hard errors: auth, permission, not-found, bad request. -> strike (then bench).
+# Hard errors: auth, permission, not-found, bad request, context length, model unavailable. -> strike (then bench).
 # Includes the cross-provider "Invalid signature in thinking block" 400 (fixed by
 # session-sanitize, but still classified hard so a stuck session doesn't loop).
+# Also catches context/token limit exceeded and model not found/unavailable.
 _is_hard_error() {  # FILE JSON
-  _err_scan_src "$1" "${2:-0}" | grep -qiE '(request failed: HTTP (400|401|403|404|413|422))|(authentication_error|permission_error|not_found_error|invalid_request_error)|(invalid.{0,10}(api[ _-]?key|token))|(unauthorized)' 2>/dev/null
+  _err_scan_src "$1" "${2:-0}" | grep -qiE '(request failed: HTTP (400|401|403|404|413|422))|(authentication_error|permission_error|not_found_error|invalid_request_error)|(invalid.{0,10}(api[ _-]?key|token))|(unauthorized)|(context.{0,20}(length|limit|size|window).{0,20}exceed)|(token.{0,20}limit.{0,20}exceed)|(maximum.{0,20}context)|(model.{0,20}(not.{0,10}(found|available|exist)|unavailable))|(request.{0,10}timeout)|(timed.{0,10}out)' 2>/dev/null
 }
 
 # classify_turn FILE STEP_TOKEN DONE_TOKEN WAS_DEADLINE [JSON]  -> echoes the class

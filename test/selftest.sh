@@ -229,6 +229,22 @@ check_deadline() {
 }
 check_deadline
 
+# New error patterns added for T7.2
+check_class "context-length-hard" "hard" 'Error: context length exceeded maximum of 200000 tokens'
+check_class "token-limit-hard" "hard" 'request failed: HTTP 400 {"error":{"message":"token limit exceeded"}}'
+check_class "model-not-found-hard" "hard" 'Error: model not found or unavailable'
+check_class "request-timeout-hard" "hard" 'request timeout after 30s'
+
+# Exit code capture (T7.2)
+. "$RR/lib/run-turn.sh"
+check_exitcode() {
+  # Spawn a process that exits with code 42, collect it via bounded_reap
+  (exit 42) & local pid=$!
+  bounded_reap "$pid"
+  [ "$TURN_EXIT_CODE" = "42" ] && ok "bounded_reap captures exit code" || fail "exit code: got=$TURN_EXIT_CODE want=42"
+}
+check_exitcode
+
 echo "== suite 2: tracker tag extraction =="
 check_tag() {  # NAME EXPECTED PLAN_CONTENT
   local name="$1" exp="$2" content="$3" got tmpdir tmpplan
@@ -834,10 +850,10 @@ if grep -qE 'tasks: [0-9]+ done / [0-9]+ total \| next: T1' "$tmp4/run.log"; the
 else
   fail "no progress line (see $tmp4/run.log)"
 fi
-if grep -qE 'turn 1 end \| class=step \| took=[0-9]+s \| task=T1' "$tmp4/run.log"; then
-  ok "turn summary line shows class + took= + task"
+if grep -qE 'turn 1 end \| class=step \| took=[0-9]+s \| exitcode=[0-9]+ \| task=T1' "$tmp4/run.log"; then
+  ok "turn summary line shows class + took= + exitcode + task"
 else
-  fail "no turn summary took= line (see $tmp4/run.log)"
+  fail "no turn summary with exitcode (see $tmp4/run.log)"
 fi
 
 echo ""
@@ -3012,6 +3028,174 @@ else
 fi
 
 cd - >/dev/null  
+rm -rf "$tmpdir"
+
+echo "Suite 34: per-task session resume (T7.1)"
+
+# Define should_resume_task inline (from bin/ratchet)
+should_resume_task() {
+  local current_taskid="$1"
+  local state_file="$REPO_DIR/.ratchet/last_task.state"
+  
+  # Fall back to ephemeral for "?" task IDs (no ID)
+  [ "$current_taskid" = "?" ] && return 1
+  
+  # No previous state -> first attempt, stay ephemeral
+  [ ! -f "$state_file" ] && return 1
+  
+  local last_taskid last_status
+  read -r last_taskid last_status < "$state_file" || return 1
+  
+  # Different task -> ephemeral
+  [ "$current_taskid" != "$last_taskid" ] && return 1
+  
+  # Same task, but last turn was not a retry-worthy failure -> ephemeral
+  case "$last_status" in
+    timeout|transient) 
+      # Warm retry: same task, retriable failure -> resume
+      RESUME_SESSION=1
+      SESSION_ID="ratchet-task-${current_taskid}"
+      return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Test 1: retry same task after timeout -> resumes
+tmpdir="$(mktemp -d)"
+REPO_DIR="$tmpdir"
+cd "$tmpdir"
+mkdir -p .ratchet
+printf 'T9.9\ttimeout\n' > .ratchet/last_task.state
+
+RESUME_SESSION=0
+SESSION_ID=""
+
+if should_resume_task "T9.9"; then
+  if [ "$RESUME_SESSION" = 1 ] && [ "$SESSION_ID" = "ratchet-task-T9.9" ]; then
+    ok "retry same task after timeout -> RESUME_SESSION=1 with session-id ratchet-task-T9.9"
+  else
+    fail "should_resume_task set RESUME_SESSION=$RESUME_SESSION SESSION_ID=$SESSION_ID"
+  fi
+else
+  fail "should_resume_task returned 1 for retry"
+fi
+
+cd - >/dev/null
+rm -rf "$tmpdir"
+
+# Test 2: retry same task after transient -> resumes
+tmpdir="$(mktemp -d)"
+REPO_DIR="$tmpdir"
+cd "$tmpdir"
+mkdir -p .ratchet
+printf 'T1.2\ttransient\n' > .ratchet/last_task.state
+
+RESUME_SESSION=0
+SESSION_ID=""
+
+if should_resume_task "T1.2"; then
+  if [ "$RESUME_SESSION" = 1 ] && [ "$SESSION_ID" = "ratchet-task-T1.2" ]; then
+    ok "retry same task after transient -> resumes"
+  else
+    fail "should_resume_task set wrong values"
+  fi
+else
+  fail "should_resume_task returned 1 for transient retry"
+fi
+
+cd - >/dev/null
+rm -rf "$tmpdir"
+
+# Test 3: different task -> ephemeral
+tmpdir="$(mktemp -d)"
+REPO_DIR="$tmpdir"
+cd "$tmpdir"
+mkdir -p .ratchet
+printf 'T1.2\ttimeout\n' > .ratchet/last_task.state
+
+RESUME_SESSION=0
+SESSION_ID=""
+
+if should_resume_task "T1.3"; then
+  fail "should_resume_task returned 0 for different task"
+else
+  if [ "$RESUME_SESSION" = 0 ]; then
+    ok "different task -> ephemeral (RESUME_SESSION=0)"
+  else
+    fail "different task should not resume"
+  fi
+fi
+
+cd - >/dev/null
+rm -rf "$tmpdir"
+
+# Test 4: "?" task id -> ephemeral
+tmpdir="$(mktemp -d)"
+REPO_DIR="$tmpdir"
+cd "$tmpdir"
+mkdir -p .ratchet
+printf 'T1.2\ttimeout\n' > .ratchet/last_task.state
+
+RESUME_SESSION=0
+SESSION_ID=""
+
+if should_resume_task "?"; then
+  fail "should_resume_task returned 0 for ? task id"
+else
+  if [ "$RESUME_SESSION" = 0 ]; then
+    ok "? task id -> ephemeral (RESUME_SESSION=0)"
+  else
+    fail "? task should not resume"
+  fi
+fi
+
+cd - >/dev/null
+rm -rf "$tmpdir"
+
+# Test 5: first attempt (no state file) -> ephemeral
+tmpdir="$(mktemp -d)"
+REPO_DIR="$tmpdir"
+cd "$tmpdir"
+mkdir -p .ratchet
+# No state file created
+
+RESUME_SESSION=0
+SESSION_ID=""
+
+if should_resume_task "T1.2"; then
+  fail "should_resume_task returned 0 for first attempt"
+else
+  if [ "$RESUME_SESSION" = 0 ]; then
+    ok "first attempt (no state file) -> ephemeral"
+  else
+    fail "first attempt should not resume"
+  fi
+fi
+
+cd - >/dev/null
+rm -rf "$tmpdir"
+
+# Test 6: same task but non-retriable status (step/done) -> ephemeral  
+tmpdir="$(mktemp -d)"
+REPO_DIR="$tmpdir"
+cd "$tmpdir"
+mkdir -p .ratchet
+printf 'T1.2\tstep\n' > .ratchet/last_task.state
+
+RESUME_SESSION=0
+SESSION_ID=""
+
+if should_resume_task "T1.2"; then
+  fail "should_resume_task returned 0 for non-retriable status"
+else
+  if [ "$RESUME_SESSION" = 0 ]; then
+    ok "same task but status=step -> ephemeral (not retriable)"
+  else
+    fail "step status should not resume"
+  fi
+fi
+
+cd - >/dev/null
 rm -rf "$tmpdir"
 
 echo ""

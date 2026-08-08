@@ -12,8 +12,9 @@
 # =============================================================================
 
 TURN_STATUS=""
+TURN_EXIT_CODE=0
 
-# bounded_reap PID -> returns within ~10s regardless of child state
+# bounded_reap PID -> returns within ~10s regardless of child state, stores exit code in TURN_EXIT_CODE
 # Polls kill -0 for up to 10s, then detaches if still alive (OS reaps orphan later)
 bounded_reap() {
   local pid="$1" reap_attempts=0
@@ -22,8 +23,9 @@ bounded_reap() {
     reap_attempts=$((reap_attempts + 1))
   done
   # If reaped during polling, collect status; otherwise detach
+  TURN_EXIT_CODE=0
   if ! kill -0 "$pid" 2>/dev/null; then
-    wait "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null || TURN_EXIT_CODE=$?
   fi
 }
 

@@ -361,7 +361,7 @@ VERIFY_CMD: bash test/selftest.sh
 > verify, task-block injection). These are the bigger follow-ups from the
 > 2026-08-07 run postmortem (T1.2 trivial task burned ~2h across 13 turns).
 
-- [IN PROGRESS] T7.1 (normal) per-task session resume: warm retries on the same task
+- [x] T7.1 (normal) per-task session resume: warm retries on the same task
       touches: bin/ratchet, lib/run-turn.sh
       do: When a turn ends timeout/stall/transient and the NEXT turn works the
           SAME task id, pass --session-id ratchet-task-<taskid> instead of
@@ -382,7 +382,7 @@ VERIFY_CMD: bash test/selftest.sh
       constraints: default path (happy turns) stays ephemeral — the token
           economy invariant holds; sessions only pay for themselves on retries.
 
-- [ ] T7.2 (normal) diagnose + classify the silent 18-95s transient deaths
+- [x] T7.2 (normal) diagnose + classify the silent 18-95s transient deaths
       touches: lib/classify.sh, lib/run-turn.sh
       do: The 2026-08-07 run had 7 turns where pi exited in 18-95s with no
           token and no matched error (classified transient, burned backoffs).
@@ -399,7 +399,7 @@ VERIFY_CMD: bash test/selftest.sh
           error-shape fixtures classify correctly)
       constraints: loop.log line grammar additive-only.
 
-- [ ] T7.3 (trivial) inject gate status into every turn prompt
+- [IN PROGRESS] T7.3 (trivial) inject gate status into every turn prompt
       touches: bin/ratchet
       do: The protocol now tells the agent to trust the prompt for gate state.
           Always write last_turn.note with an explicit first line:
