@@ -1,50 +1,8 @@
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T05:43:34Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T06:12:09Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T06:44:32Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T07:01:31Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T07:34:03Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T08:06:27Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T08:23:46Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T09:11:39Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T09:30:25Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T10:04:02Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T10:20:14Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T11:10:20Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T11:43:16Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T12:07:07Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T12:39:29Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T13:08:05Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T13:27:19Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T13:49:13Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T14:06:12Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T14:25:16Z
-## auto-captured
-  ok   rank snapshot reused (stable despite registry change)  # 2026-08-08T14:42:36Z
-## auto-captured
-selftest: 246 passed, 1 failed  # 2026-08-08T16:16:41Z
-## auto-captured
-selftest: 258 passed, 1 failed  # 2026-08-08T17:18:20Z
-## auto-captured
-selftest: 258 passed, 1 failed  # 2026-08-08T17:27:45Z
-## auto-captured
-selftest: 258 passed, 1 failed  # 2026-08-08T17:45:12Z
+# Learnings
+
+> Append-only guardrails the agent discovers while working on this repo.
+> Read this before each turn; add new gotchas you hit (one bullet per line).
+> A planner turn prunes stale entries periodically. The loop never depends on
+> this file — it is advisory memory, not state.
+
+- _(example)_ `npm test` must run from the repo root; a nested cwd makes it red.

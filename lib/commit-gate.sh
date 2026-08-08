@@ -91,20 +91,14 @@ commit_turn() {
   if [ "$COMMIT_VERIFY_GATE" = 1 ]; then
     if [ -n "$VERIFY_CMD" ]; then
       emit "  commit gate: running '$VERIFY_CMD' …"
-      if ! ( cd "$REPO_DIR" && eval "$VERIFY_CMD" ) >>"$LOOP_LOG" 2>&1; then
-        # capture the verify's actual last failure line BEFORE emitting the RED
-        # banner (emitting first made the capture grab its own banner — 17 junk
-        # "commit gate RED" lines polluted LEARNINGS.md and every turn's context).
-        local _lrn="$REPO_DIR/LEARNINGS.md" _err _ts
-        _err=$(tail -n 20 "$LOOP_LOG" | grep -v '^[[:space:]]*$' | grep -v 'commit gate' | tail -n1)
+      # Verify output goes to its own file, not loop.log: a chatty VERIFY_CMD
+      # (e.g. a 250-case selftest) otherwise floods loop.log with thousands of
+      # 'ok' lines per turn, burying the signal grammar. Last 40 lines echoed
+      # into loop.log only on failure, so RED turns stay diagnosable.
+      local _vout="${LOOP_LOG%/*}/last_verify.out"
+      if ! ( cd "$REPO_DIR" && eval "$VERIFY_CMD" ) >"$_vout" 2>&1; then
         emit "  commit gate RED — NOT committing; leaving work for next turn to repair."
-        [ -n "$_err" ] && _ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" && {
-          grep -qxF "$_err" "$_lrn" 2>/dev/null || {
-            echo "## auto-captured" >>"$_lrn" 2>/dev/null || true
-            echo "$_err  # $_ts" >>"$_lrn" || true
-            tail -n 50 "$_lrn" >"$_lrn.tmp" 2>/dev/null && mv "$_lrn.tmp" "$_lrn" 2>/dev/null || true
-          }
-        }
+        tail -n 40 "$_vout" >>"$LOOP_LOG" 2>/dev/null || true
         return 1
       fi
     else
