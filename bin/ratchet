@@ -199,9 +199,11 @@ main() {
 
   # run / once: doctor preflight first (fail before the first turn, not turn 3).
   emit "preflight (doctor) ..."
-  if ! cmd_doctor "$REPO_DIR" 0 >/dev/null 2>&1; then
+  # subshell: cmd_doctor re-parses the repo conf, which would clobber CLI
+  # overrides (--verify-cmd, --models) already applied by parse_args.
+  if ! ( cmd_doctor "$REPO_DIR" 0 ) >/dev/null 2>&1; then
     emit "preflight FAILED — run 'ratchet doctor $REPO_DIR' for details. Aborting before any turn."
-    cmd_doctor "$REPO_DIR" 0
+    ( cmd_doctor "$REPO_DIR" 0 )
     exit 1
   fi
 
