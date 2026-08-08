@@ -366,6 +366,77 @@ VERIFY_CMD: bash test/selftest.sh
       constraints: read-only over logs; snapshot rewrite only via explicit
           refresh.
 
+## Milestone 7 — turn economics, part 2 (speed follow-ups)
+> Part 1 landed by hand (salvage-on-timeout, STALL_TIMEOUT=120, no double-
+> verify, task-block injection). These are the bigger follow-ups from the
+> 2026-08-07 run postmortem (T1.2 trivial task burned ~2h across 13 turns).
+
+- [ ] T7.1 (normal) per-task session resume: warm retries on the same task
+      touches: bin/ratchet, lib/run-turn.sh
+      do: When a turn ends timeout/stall/transient and the NEXT turn works the
+          SAME task id, pass --session-id ratchet-task-<taskid> instead of
+          --no-session so the retry resumes with context instead of cold
+          rediscovering (~39k tokens + 2-5min per retry). First attempt of a
+          task stays ephemeral. Sanitize the session (existing machinery)
+          before resume. Clear/rotate the per-task session once the task goes
+          [x]. Task id from tracker_next_id_and_text; fall back to ephemeral
+          when the id is "?".
+      accept:
+          Given a turn that times out on task T9.9
+          When the next turn starts and T9.9 is still the current task
+          Then the agent is invoked with --session-id ratchet-task-T9.9
+          Given the task changed between turns
+          Then the turn is ephemeral (--no-session) as today
+      verify: bash test/selftest.sh   (add cases: retry-same-task resumes,
+          new-task ephemeral, "?" id ephemeral)
+      constraints: default path (happy turns) stays ephemeral — the token
+          economy invariant holds; sessions only pay for themselves on retries.
+
+- [ ] T7.2 (normal) diagnose + classify the silent 18-95s transient deaths
+      touches: lib/classify.sh, lib/run-turn.sh
+      do: The 2026-08-07 run had 7 turns where pi exited in 18-95s with no
+          token and no matched error (classified transient, burned backoffs).
+          Capture the agent's exit code in run_turn (wait "$pid" already
+          collects it in bounded_reap — preserve it into a global) and log it
+          on the frozen turn-end line as an ADDITIVE field (exitcode=N).
+          Inspect a real failure output, add the unmatched error shape(s) to
+          classify.sh so they route to the right class (exhausted/hard)
+          instead of transient.
+      accept:
+          Given a turn whose agent exits nonzero without a token
+          Then loop.log's turn-end line carries exitcode=N
+      verify: bash test/selftest.sh   (add case: exit code captured; new
+          error-shape fixtures classify correctly)
+      constraints: loop.log line grammar additive-only.
+
+- [ ] T7.3 (trivial) inject gate status into every turn prompt
+      touches: bin/ratchet
+      do: The protocol now tells the agent to trust the prompt for gate state.
+          Always write last_turn.note with an explicit first line:
+          "Verify gate after last turn: GREEN" or "... RED (fix this first)" —
+          including after salvage commits and error turns (today the note is
+          only refreshed on step/done paths, so stale notes can lie).
+      accept:
+          Given a salvaged (timeout+green) turn
+          Then the next turn's prompt says the gate is GREEN
+          Given a RED gate turn
+          Then the next prompt's first note line says RED
+      verify: bash test/selftest.sh   (note content cases)
+      constraints: note is one small file; never authoritative over the gate.
+
+- [ ] T7.4 (normal) speed up the selftest itself (60s real vs 12s CPU)
+      touches: test/selftest.sh
+      do: The gate runs the full suite before every commit; 60s real vs 12s
+          CPU means ~48s is sleeps/process-spawn overhead. Hunt sleeps and
+          serial mktemp-heavy fixtures; batch or drop waits where the assert
+          doesn't need them. Target: full suite under ~20s real. No case
+          deleted, count never drops.
+      accept:
+          Given bash test/selftest.sh on a dev machine
+          Then it passes with the same (or higher) case count in <20s real
+      verify: time bash test/selftest.sh
+      constraints: additive baseline invariant (234+ cases stay green).
+
 ## Non-goals
 - Parallel milestones / worktrees while a PR awaits merge (future; requires
   planner `(independent)` tags + worktree isolation).
