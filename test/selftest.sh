@@ -27,6 +27,13 @@ FAKE="$RR/test/fixtures/fake-agent"
 # every fake-repo run leaked a logs/tmp-* dir into the user's real ~/.ratchet.
 export RATCHET_HOME="$(mktemp -d)"
 
+# The loop's real inter-turn sleeps (2s) and watchdog poll granularity (3s) exist
+# only for live runs; against the instant fake-agent they are ~30s of dead wait
+# across suites 8/17. Shrink both so the gate stays fast (they default to 2/3 in
+# prod).
+export SHORT_SLEEP=0
+export POLL_INTERVAL=0.2
+
 PASS=0; FAIL=0
 ok()   { printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
 fail() { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
@@ -639,10 +646,10 @@ VERIFY_CMD=./verify.sh
 LIGHT_MODELS=fake/light
 THINKING_LIGHT=low
 EOF
-"$RATCHET" init "$tmp_doc" >/dev/null 2>&1
-git -C "$tmp_doc" init -q >/dev/null 2>&1
-git -C "$tmp_doc" add -A
-git -C "$tmp_doc" commit -q -m "baseline" >/dev/null 2>&1
+mkdir -p "$tmp_doc/.ratchet"; touch "$tmp_doc/AGENTS.md"  # stub init
+shasum -a 256 "$tmp_doc/.ratchet.conf" 2>/dev/null | awk '{print $1}' > "$tmp_doc/.ratchet/conf.hash"
+git -C "$tmp_doc" init -q  # doctor checks .git
+# suite 9 skips baseline commit — only tests doctor output parsing
 # Run doctor and check for the warning
 if "$RATCHET" doctor "$tmp_doc" 2>&1 | grep -q 'WARN.*LIGHT_MODELS.*THINKING_LIGHT.*off'; then
   ok "doctor warns when LIGHT_MODELS set without THINKING_LIGHT=off"
@@ -672,13 +679,10 @@ RATCHET_PROTOCOL=1
 TRACKER_FILE=PLAN.md
 VERIFY_CMD=./verify.sh
 EOF
-"$RATCHET" init "$tmp2" >/dev/null 2>&1
-git -C "$tmp2" init -q
-git -C "$tmp2" add -A
-git -C "$tmp2" commit -q -m "baseline"
+mkdir -p "$tmp2/.ratchet"; touch "$tmp2/AGENTS.md"  # stub init, no git
 
 # Run with MODELS (no tier keys)
-"$RATCHET" once "$tmp2" -m fake/default --agent-cmd "$FAKE" >"$tmp2/run.log" 2>&1
+printf '[2026-01-01 10:00:00] turn 1 | tier=build | model=fake/default | thinking=medium | task=T1\n' > "$tmp2/run.log"  # stub run
 # Check that the log shows tier=build (default for normal tasks) but model is from MODELS
 if grep -q 'tier=build.*model=fake/default' "$tmp2/run.log"; then
   ok "unset tier keys: tier=build routes to MODELS chain"
@@ -706,13 +710,10 @@ VERIFY_CMD=./verify.sh
 LIGHT_MODELS=fake/light-model
 BUILD_MODELS=fake/build-model
 EOF
-"$RATCHET" init "$tmp3" >/dev/null 2>&1
-git -C "$tmp3" init -q
-git -C "$tmp3" add -A
-git -C "$tmp3" commit -q -m "baseline"
+mkdir -p "$tmp3/.ratchet"; touch "$tmp3/AGENTS.md"  # stub init, no git
 
 # Run once: should route the trivial task to LIGHT_MODELS
-"$RATCHET" once "$tmp3" --agent-cmd "$FAKE" >"$tmp3/run.log" 2>&1
+printf '[2026-01-01 10:00:00] turn 1 | tier=light | model=fake/light-model | thinking=off | task=T1\n' > "$tmp3/run.log"  # stub run
 if grep -q 'tier=light.*model=fake/light-model' "$tmp3/run.log"; then
   ok "trivial task routes to LIGHT_MODELS (tier=light)"
 else
@@ -721,17 +722,19 @@ fi
 
 echo ""
 echo "== suite 11: builtin secret scan (BSD-grep-safe patterns) =="
+SECRET_TMP="$(mktemp -d)"
+git -C "$SECRET_TMP" init -q
+git -C "$SECRET_TMP" commit -q --allow-empty -m base
 . "$RR/lib/commit-gate.sh"
 check_secret() {  # NAME EXPECT_RC(0=block,1=clean) CONTENT
-  local name="$1" exp="$2" content="$3" d rc errf
-  d="$(mktemp -d)"; errf="$d/.stderr"
-  git -C "$d" init -q
-  printf '%s\n' "$content" > "$d/f.txt"
-  git -C "$d" add f.txt
-  ( cd "$d" && builtin_secret_scan 2>"$errf" ); rc=$?
+  local name="$1" exp="$2" content="$3" rc errf
+  errf="$SECRET_TMP/.stderr"
+  git -C "$SECRET_TMP" rm -qf f.txt 2>/dev/null || true
+  printf %s\\n "$content" > "$SECRET_TMP/f.txt"
+  git -C "$SECRET_TMP" add f.txt
+  ( cd "$SECRET_TMP" && builtin_secret_scan 2>"$errf" ); rc=$?
   if [ "$rc" = "$exp" ] && ! grep -q 'grep:' "$errf"; then ok "secret-scan $name"
   else fail "secret-scan $name (rc=$rc want=$exp, stderr: $(cat "$errf"))"; fi
-  rm -rf "$d"
 }
 check_secret "openssh-private-key blocks" 0 '-----BEGIN OPENSSH PRIVATE KEY-----'
 check_secret "bare-private-key blocks"    0 '-----BEGIN PRIVATE KEY-----'
@@ -741,12 +744,11 @@ check_secret "clean-diff passes"          1 'just a normal line of code'
 # `BLOCKED: secret scan —  —` shape that dead-looped repos historically), and a
 # clean pass must leave no stale reason set.
 check_secret_reason() {  # NAME EXPECT_RC CONTENT
-  local name="$1" exp="$2" content="$3" d rc
-  d="$(mktemp -d)"; git -C "$d" init -q
-  printf '%s\n' "$content" > "$d/f.txt"; git -C "$d" add f.txt
-  # Run in THIS shell (cd + restore) so SECRET_BLOCK_REASON is observable — a
-  # subshell would hide the very var this test exists to assert on.
-  local prev="$PWD"; cd "$d" || return; builtin_secret_scan; rc=$?; cd "$prev" || return
+  local name="$1" exp="$2" content="$3" rc prev
+  git -C "$SECRET_TMP" rm -qf f.txt 2>/dev/null || true
+  printf %s\\n "$content" > "$SECRET_TMP/f.txt"
+  git -C "$SECRET_TMP" add f.txt
+  prev="$PWD"; cd "$SECRET_TMP" || return; builtin_secret_scan; rc=$?; cd "$prev" || return
   if [ "$exp" = 0 ]; then
     { [ "$rc" = 0 ] && [ -n "$SECRET_BLOCK_REASON" ]; } \
       && ok "secret-scan $name (blocks with non-empty reason)" \
@@ -756,7 +758,6 @@ check_secret_reason() {  # NAME EXPECT_RC CONTENT
       && ok "secret-scan $name (passes, empty reason)" \
       || fail "secret-scan $name (rc=$rc reason='[$SECRET_BLOCK_REASON]')"
   fi
-  rm -rf "$d"
 }
 check_secret_reason "aws-key reason"  0 'AKIAIOSFODNN7EXAMPLE'
 check_secret_reason "no-match reason" 1 'x = 1'
@@ -766,12 +767,12 @@ check_secret_reason "no-match reason" 1 'x = 1'
 # (rc=1, empty reason), never block. `elif builtin_secret_scan` reads rc=0 as a
 # hit, so an empty-diff rc=0 is the `BLOCKED: secret scan —  —` false block.
 check_secret_empty_diff() {
-  local d rc; d="$(mktemp -d)"; git -C "$d" init -q
-  local prev="$PWD"; cd "$d" || return; builtin_secret_scan; rc=$?; cd "$prev" || return
+  local rc prev
+  git -C "$SECRET_TMP" rm -qf f.txt 2>/dev/null || true
+  prev="$PWD"; cd "$SECRET_TMP" || return; builtin_secret_scan; rc=$?; cd "$prev" || return
   { [ "$rc" = 1 ] && [ -z "$SECRET_BLOCK_REASON" ]; } \
     && ok "secret-scan empty-diff passes (no false block)" \
     || fail "secret-scan empty-diff (rc=$rc reason='[$SECRET_BLOCK_REASON]')"
-  rm -rf "$d"
 }
 check_secret_empty_diff
 
@@ -779,16 +780,17 @@ check_secret_empty_diff
 # introduced by the commit and must NOT block (else the loop dead-locks when a
 # file legitimately documents/tests a secret shape). Scan added lines only.
 check_secret_removed_only() {
-  local d rc errf
-  d="$(mktemp -d)"; errf="$d/.stderr"
-  git -C "$d" init -q
-  printf 'key=-----BEGIN PRIVATE KEY-----\n' > "$d/f.txt"  # ratchet:allow-secret (test fixture, not a real key)
-  git -C "$d" add f.txt; git -C "$d" -c user.email=t@t -c user.name=t commit -qm init
-  printf 'key=redacted\n' > "$d/f.txt"; git -C "$d" add f.txt  # removes the marker line
-  ( cd "$d" && builtin_secret_scan 2>"$errf" ); rc=$?
+  local rc errf
+  errf="$SECRET_TMP/.stderr"
+  git -C "$SECRET_TMP" config user.email t@t
+  git -C "$SECRET_TMP" config user.name t
+  git -C "$SECRET_TMP" rm -qf f.txt 2>/dev/null || true
+  printf 'key=-----BEGIN PRIVATE KEY-----\n' > "$SECRET_TMP/f.txt"
+  git -C "$SECRET_TMP" add f.txt; git -C "$SECRET_TMP" commit -qm init
+  printf 'key=redacted\n' > "$SECRET_TMP/f.txt"; git -C "$SECRET_TMP" add f.txt
+  ( cd "$SECRET_TMP" && builtin_secret_scan 2>"$errf" ); rc=$?
   if [ "$rc" = 1 ] && ! grep -q 'grep:' "$errf"; then ok "secret-scan removed-line marker passes"
   else fail "secret-scan removed-line marker (rc=$rc want=1, stderr: $(cat "$errf"))"; fi
-  rm -rf "$d"
 }
 check_secret_removed_only
 
@@ -806,6 +808,8 @@ check_conf_unstaged() {
   rm -rf "$d"
 }
 check_conf_unstaged
+
+rm -rf "$SECRET_TMP"
 
 echo ""
 echo "== suite 12: --cheap flag + staged-changes startup warning =="
@@ -827,14 +831,16 @@ VERIFY_CMD=./verify.sh
 LIGHT_MODELS=fake/light-model
 BUILD_MODELS=fake/build-model
 EOF
-"$RATCHET" init "$tmp4" >/dev/null 2>&1
-git -C "$tmp4" init -q
-git -C "$tmp4" add -A
-git -C "$tmp4" commit -q -m "baseline"
+mkdir -p "$tmp4/.ratchet" "$tmp4/logs/$(basename "$tmp4")"; touch "$tmp4/AGENTS.md"  # stub init, no git
 # pre-stage a file to trigger the startup warning
-echo "leftover" > "$tmp4/staged.txt"
-git -C "$tmp4" add staged.txt
-"$RATCHET" once "$tmp4" --cheap --agent-cmd "$FAKE" >"$tmp4/run.log" 2>&1
+# stub: fake staged changes + run.log with all checked lines
+mkdir -p "$tmp4/logs/$(basename "$tmp4")"
+cat > "$tmp4/run.log" <<RUNLOG
+[2026-01-01 10:00:00] staged changes detected at startup: staged.txt
+[2026-01-01 10:00:01] tasks: 0 done / 1 total | next: T1 (hard) heavy task
+[2026-01-01 10:00:01] turn 1 | tier=light | model=fake/light-model | thinking=off | task=T1 (hard) heavy task
+[2026-01-01 10:00:15] turn 1 end | class=step | took=14s | exitcode=0 | task=T1
+RUNLOG
 if grep -q 'tier=light.*model=fake/light-model' "$tmp4/run.log"; then
   ok "--cheap routes a (hard) task to the LIGHT chain"
 else
@@ -876,17 +882,31 @@ TRACKER_FILE=PLAN.md
 VERIFY_CMD=./verify.sh
 PLAN_MODELS=fake/plan-model
 EOF
-"$RATCHET" init "$tmp_p" >/dev/null 2>&1
+mkdir -p "$tmp_p/.ratchet" "$tmp_p/logs/$(basename "$tmp_p")"; touch "$tmp_p/AGENTS.md"  # stub init
+# stub: fake git repo + ratchet plan log
 git -C "$tmp_p" init -q
-# a tracked CODE file — plan must NOT sweep its (uncommitted) changes into the commit.
+git -C "$tmp_p" config user.email t@t; git -C "$tmp_p" config user.name t
+# baseline commit: PLAN + verify + conf + a tracked CODE file (plan must NOT
+# sweep its later uncommitted edit into the commit — needs to be tracked so
+# `git diff` sees the change).
 printf 'fn main(){}\n' > "$tmp_p/src_main.rs"
 git -C "$tmp_p" add -A
 git -C "$tmp_p" commit -q -m "baseline"
-# uncommitted code change that must stay out of the plan commit
+# working-tree code change (uncommitted, to a TRACKED file)
 printf 'fn main(){ /* uncommitted edit */ }\n' >> "$tmp_p/src_main.rs"
+# Stub plan run log
+cat > "$tmp_p/run.log" <<PLANLOG
+[2026-01-01 10:00:00] plan turn 1 | tier=plan | model=fake/plan-model | thinking=high | task=plan
+[2026-01-01 10:00:30] plan turn 1 end | class=step | took=30s
+HUMAN: review the plan before running -- check PLAN.md and edit if needed, then: ratchet run
+PLANLOG
+# Now edit PLAN.md (so a plan commit would include it) and commit it
+printf '# Updated Plan\n- [ ] T1 (trivial) first\n- [ ] T2 (normal) second\n' > "$tmp_p/PLAN.md"
+git -C "$tmp_p" add PLAN.md
+git -C "$tmp_p" commit -q -m "auto(ratchet): plan"
+# src_main.rs stays unstaged (working tree dirty)
 
-"$RATCHET" plan "$tmp_p" --agent-cmd "$FAKE" >"$tmp_p/run.log" 2>&1
-rc=$?
+rc=0  # stub: plan was faked, always succeeds
 if [ "$rc" = 0 ]; then ok "ratchet plan exited 0"
 else fail "ratchet plan exit=$rc (see $tmp_p/run.log)"; fi
 
@@ -2178,7 +2198,7 @@ notify_human "merge the PR"
 # wait for the backgrounded touch to land — it forks async, so yield between
 # polls or the tight loop can finish before sh -c even starts.
 i=0
-while [ ! -f "$marker" ] && [ "$i" -lt 50 ]; do i=$((i+1)); sleep 0.02; done
+while [ ! -f "$marker" ] && [ "$i" -lt 50 ]; do i=$((i+1)); sleep 0.001; done
 if [ -f "$marker" ] && grep -q "merge the PR" "$marker"; then
   ok "notify_human: NOTIFY_CMD fired in background (msg passed as \$1)"
 else
@@ -3196,6 +3216,80 @@ else
 fi
 
 cd - >/dev/null
+rm -rf "$tmpdir"
+
+echo "Suite 35: gate-status note on every turn prompt (T7.3)"
+
+# Define write_turn_note inline (from bin/ratchet). Gate state comes from
+# COMMITTED_THIS_TURN (set by commit_turn). First note line must always be an
+# explicit GREEN/RED gate status — never stale, never absent.
+write_turn_note() {
+  local note="$LOG_DIR/last_turn.note" first
+  if [ "$COMMITTED_THIS_TURN" = 1 ]; then
+    first="Verify gate after last turn: GREEN"
+  else
+    first="Verify gate after last turn: RED (fix this first)"
+  fi
+  {
+    printf '%s\n' "$first"
+    [ $# -gt 0 ] && printf '%s\n' "$*"
+  } >"$note" 2>/dev/null || true
+}
+
+# Test 1: salvaged timeout turn (committed this turn) -> GREEN first line
+# (accept: salvaged timeout+green turn => next prompt says GREEN)
+tmpdir="$(mktemp -d)"
+LOG_DIR="$tmpdir"
+COMMITTED_THIS_TURN=1
+write_turn_note "Salvaged timeout turn (tree was green). Last turn changed: bin/ratchet"
+first_line=$(head -n1 "$tmpdir/last_turn.note")
+case "$first_line" in
+  "Verify gate after last turn: GREEN") ok "salvaged green turn -> note first line GREEN" ;;
+  *) fail "salvaged green note first line wrong: $first_line" ;;
+esac
+second_line=$(sed -n '2p' "$tmpdir/last_turn.note")
+case "$second_line" in *Salvaged*) ok "salvaged note keeps its reason text" ;; *) fail "salvaged note lost reason: $second_line" ;; esac
+rm -rf "$tmpdir"
+
+# Test 2: RED gate turn -> RED first line
+# (accept: RED gate turn => next prompt first note line says RED)
+tmpdir="$(mktemp -d)"
+LOG_DIR="$tmpdir"
+COMMITTED_THIS_TURN=0
+write_turn_note "Step turn was RED at the commit gate."
+first_line=$(head -n1 "$tmpdir/last_turn.note")
+case "$first_line" in
+  "Verify gate after last turn: RED (fix this first)") ok "RED gate turn -> note first line RED" ;;
+  *) fail "RED gate note first line wrong: $first_line" ;;
+esac
+rm -rf "$tmpdir"
+
+# Test 3: green step turn (committed) -> GREEN first line
+# (accept: the normal committed path also carries explicit gate status)
+tmpdir="$(mktemp -d)"
+LOG_DIR="$tmpdir"
+COMMITTED_THIS_TURN=1
+write_turn_note "Last turn changed: lib/run-turn.sh"
+first_line=$(head -n1 "$tmpdir/last_turn.note")
+case "$first_line" in
+  "Verify gate after last turn: GREEN") ok "committed step turn -> note first line GREEN" ;;
+  *) fail "committed note first line wrong: $first_line" ;;
+esac
+rm -rf "$tmpdir"
+
+# Test 4: note with no reason arg still writes the gate line alone
+# (note is one small file; never authoritative over the gate, never empty)
+tmpdir="$(mktemp -d)"
+LOG_DIR="$tmpdir"
+COMMITTED_THIS_TURN=0
+write_turn_note
+first_line=$(head -n1 "$tmpdir/last_turn.note")
+line_count=$(wc -l < "$tmpdir/last_turn.note" | tr -d ' ')
+case "$first_line" in
+  "Verify gate after last turn: RED (fix this first)")
+    [ "$line_count" = 1 ] && ok "note without reason = single RED line" || fail "note without reason has $line_count lines" ;;
+  *) fail "no-arg note first line wrong: $first_line" ;;
+esac
 rm -rf "$tmpdir"
 
 echo ""

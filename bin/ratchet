@@ -169,6 +169,25 @@ should_resume_task() {
   esac
 }
 
+# write_turn_note [REASON...] -> always writes last_turn.note with an explicit
+# gate-status FIRST line ("Verify gate after last turn: GREEN|RED ..."), so the
+# next turn's prompt never trusts a stale note. Gate state is derived from
+# COMMITTED_THIS_TURN (set by commit_turn). Optional REASON text follows.
+# Called on EVERY loop exit path (done/step/salvage/error) — the note is one
+# small file and never authoritative over the gate, but it must never lie.
+write_turn_note() {
+  local note="$LOG_DIR/last_turn.note" first
+  if [ "$COMMITTED_THIS_TURN" = 1 ]; then
+    first="Verify gate after last turn: GREEN"
+  else
+    first="Verify gate after last turn: RED (fix this first)"
+  fi
+  {
+    printf '%s\n' "$first"
+    [ $# -gt 0 ] && printf '%s\n' "$*"
+  } >"$note" 2>/dev/null || true
+}
+
 # clear_task_session TASKID -> removes the per-task session files
 clear_task_session() {
   local taskid="$1"
@@ -627,6 +646,7 @@ $(cat "$LOG_DIR/last_turn.note")"
         if ! commit_turn "$turn" "$model"; then
           done_gate_fails=$((done_gate_fails+1))
           emit "DONE turn was RED at commit gate — treating as repair-needed, not complete (${done_gate_fails}/${MAX_DONE_GATE_FAILS})."
+          write_turn_note "DONE turn was RED at the commit gate."
           [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
           # The agent already thinks all work is done, so it cannot self-repair a
           # gate it structurally can't pass (e.g. a secret-scan false positive).
@@ -647,6 +667,7 @@ $(cat "$LOG_DIR/last_turn.note")"
         all_benched_count=0
         if ! commit_turn "$turn" "$model"; then
           emit "step turn RED at commit gate — next turn will repair. Sleeping ${SHORT_SLEEP}s."
+          write_turn_note "Step turn was RED at the commit gate."
           [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
           sleep "$SHORT_SLEEP"; continue
         fi
@@ -676,6 +697,8 @@ $(cat "$LOG_DIR/last_turn.note")"
         if [ -d .git ] && [ -n "$(git status --porcelain 2>/dev/null)" ]; then
           if commit_turn "$turn" "$model" && [ "$COMMITTED_THIS_TURN" = 1 ]; then
             emit "turn killed ($TURN_STATUS) but tree was green — salvaged work as a commit; continuing."
+            local _changed; _changed=$(git diff HEAD~1 --name-only 2>/dev/null | head -n5 | tr '\n' ',' | sed 's/,$//')
+            write_turn_note "Salvaged timeout turn (tree was green). Last turn changed: ${_changed}"
             transient_arr[$idx]=0
             [ "$ONCE" = 1 ] && { emit "--once: stopping."; break; }
             sleep "$SHORT_SLEEP"; continue
@@ -773,12 +796,12 @@ $(cat "$LOG_DIR/last_turn.note")"
       fi
     fi
     
-    # write last-turn note for next turn's prompt
+    # write last-turn note for next turn's prompt (explicit gate-status first line)
     if [ "$COMMITTED_THIS_TURN" = 1 ]; then
-      git diff HEAD~1 --name-only 2>/dev/null | head -n5 | tr '\n' ',' | sed 's/,$//' >"$LOG_DIR/last_turn.note" 2>/dev/null || true
-      sed -i '' "1s/^/Last turn changed: /" "$LOG_DIR/last_turn.note" 2>/dev/null || sed -i "1s/^/Last turn changed: /" "$LOG_DIR/last_turn.note" 2>/dev/null || true
+      local _changed; _changed=$(git diff HEAD~1 --name-only 2>/dev/null | head -n5 | tr '\n' ',' | sed 's/,$//')
+      write_turn_note "Last turn changed: ${_changed}"
     else
-      echo "Last turn: gate RED, left staged." >"$LOG_DIR/last_turn.note" 2>/dev/null || true
+      write_turn_note "Last turn: gate RED, left staged."
     fi
   done
 

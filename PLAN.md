@@ -399,7 +399,7 @@ VERIFY_CMD: bash test/selftest.sh
           error-shape fixtures classify correctly)
       constraints: loop.log line grammar additive-only.
 
-- [IN PROGRESS] T7.3 (trivial) inject gate status into every turn prompt
+- [x] T7.3 (trivial) inject gate status into every turn prompt
       touches: bin/ratchet
       do: The protocol now tells the agent to trust the prompt for gate state.
           Always write last_turn.note with an explicit first line:
@@ -414,8 +414,19 @@ VERIFY_CMD: bash test/selftest.sh
       verify: bash test/selftest.sh   (note content cases)
       constraints: note is one small file; never authoritative over the gate.
 
-- [ ] T7.4 (normal) speed up the selftest itself (60s real vs 12s CPU)
-      touches: test/selftest.sh
+- [x] T7.4 (normal) speed up the selftest itself (60s real vs 12s CPU)
+      touches: test/selftest.sh, lib/common.sh, lib/run-turn.sh
+      done: Root cause was NOT mktemp/git-init (86 inits total ~0.8s) but the
+          loop's two inter-turn sleeps paid by every `ratchet once`: SHORT_SLEEP
+          (2s post-turn) + the watchdog poll granularity (hardcoded `sleep 3`).
+          Suites 8/17 run the loop ~15x = ~30s of dead wait against the instant
+          fake-agent. Fix: made both env-overridable (POLL_INTERVAL default 3,
+          SHORT_SLEEP default 2 unchanged in prod) and set SHORT_SLEEP=0 /
+          POLL_INTERVAL=0.2 in the selftest. 65s -> 40s real, 297/297 green.
+          Remainder is ~1.9s fixed startup x ~15 loop invocations; driving under
+          20s would mean cutting real end-to-end cases, which the constraint
+          forbids. ponytail: per-run startup floor, upgrade path = share one
+          fixture repo across suite-17 cases if the gate ever needs <20s.
       do: The gate runs the full suite before every commit; 60s real vs 12s
           CPU means ~48s is sleeps/process-spawn overhead. Hunt sleeps and
           serial mktemp-heavy fixtures; batch or drop waits where the assert

@@ -113,7 +113,7 @@ run_turn() {
         term_only "  ... working ($elapsed, model=$model) | $activity"
       fi
     fi
-    sleep 3
+    sleep "$POLL_INTERVAL"
   done
 
   # Print trailing newline after in-place updates so next emit starts fresh

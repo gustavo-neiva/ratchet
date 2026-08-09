@@ -26,7 +26,8 @@ TURN_TIMEOUT=1800               # max wall-clock seconds for ONE agent turn (han
 STALL_TIMEOUT=120               # kill a turn whose output stops growing this long (streaming agents only)
                                 # observed hangs sit at message_start streaming nothing; healthy json
                                 # turns emit events continuously. Keep > the longest silent tool run.
-SHORT_SLEEP=2                   # seconds between normal turns (nothing to wait for after green)
+SHORT_SLEEP="${SHORT_SLEEP:-2}"     # seconds between normal turns (nothing to wait for after green)
+POLL_INTERVAL="${POLL_INTERVAL:-3}" # run_turn watchdog poll granularity (selftest sets it low)
 MAX_TRANSIENT=3                 # consecutive transient/hard failures before a model is benched
 MAX_DONE_GATE_FAILS=3           # consecutive ALL_DONE turns blocked at the commit gate before the loop stops for human review (a done agent can't self-repair a structural gate failure)
 COOLDOWN=14400                  # seconds a benched model is skipped (≈ common daily-quota refresh)
