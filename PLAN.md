@@ -438,9 +438,131 @@ VERIFY_CMD: bash test/selftest.sh
       verify: time bash test/selftest.sh
       constraints: additive baseline invariant (234+ cases stay green).
 
+## Milestone 8 — parallel worktree fanout (race-safe + self-cleaning)
+> Run independent milestones concurrently, one git worktree each. Research
+> (claude-code#47266, #55724; amitkoth git-worktree-shared-state, git v2.50.1
+> source) established the three hazards this milestone MUST design around:
+> (1) `git worktree add` writes shared `.git/config` → config.lock race at
+>     CREATION, before any agent runs → creation must be SERIAL.
+> (2) `refs/stash` is SHARED across worktrees (only refs/worktree|bisect|
+>     rewritten are per-tree) → an agent `git stash pop` can apply a sibling's
+>     edit, silently, exit 0 → forbid stash in parallel mode.
+> (3) a stashed mid-task tree reports dirty=0/unpushed=0/merged=yes → naive
+>     sweeps DELETE live work → cleanup gates must fail toward KEEP.
+> The loop is a process supervisor: worktrees isolate the working dir + index;
+> everything under `.git/` (objects, config, refs, stash) is shared. The design
+> serializes the few shared WRITES and never checks out the default branch off
+> a parallel loop.
+
+- [ ] T8.1 (normal) PARALLEL mode: on-branch loop, never checkout default branch
+      touches: bin/ratchet, lib/common.sh, lib/contract.sh, templates/ratchet.conf.example
+      do: Add PARALLEL default 0 in common.sh + allowlist PARALLEL in
+          CONTRACT_KEYS (numeric). When PARALLEL=1, `wait_for_merge` must NOT
+          `git checkout <default>` / `git pull --ff-only` (bin/ratchet:236-237)
+          — that shared-ref write is the corruption path when N loops run. In
+          PARALLEL mode the loop stays on its own ratchet/m-<slug> branch for
+          its whole life: poll the PR, and on MERGED simply return 0 and EXIT
+          the loop (no branch switch, no pull). Keep the serial (PARALLEL=0)
+          path byte-identical. Export GIT_OPTIONAL_LOCKS=0 for the loop's git
+          calls to cut read-side lock pressure on shared .git.
+      accept:
+          Given PARALLEL=1 and a stub gh returning OPEN then MERGED
+          When wait_for_merge runs
+          Then it returns 0 without any `git checkout`/`git pull` and HEAD is
+          still the milestone branch
+          Given PARALLEL=0 (default)
+          Then wait_for_merge behavior is byte-identical to today (ff's main)
+      verify: bash test/selftest.sh   (stub gh: parallel path stays on branch;
+          serial path still checks out+ff's main)
+      constraints: additive; PARALLEL=0 default path unchanged. No `gh pr merge`.
+
+- [ ] T8.2 (normal) forbid git stash in parallel mode (shared-stash guard)
+      touches: templates/AGENTS.md (protocol), lib/common.sh (proto text)
+      do: `refs/stash` is shared across worktrees, so an agent stash in one
+          worktree is visible/poppable in another. Ratchet already commits only
+          through the green gate — stash should never appear. When PARALLEL=1,
+          the turn-prompt protocol gains one line: "NEVER run `git stash` — the
+          stash stack is shared across parallel worktrees; commit through the
+          gate or leave the tree dirty for the next turn." This is prompt-only;
+          no harness code parses stash. (If a WIP save is ever needed the
+          per-worktree plumbing is `git update-ref refs/worktree/wip $(git
+          stash create)` — documented in T8.4, not automated here.)
+      accept:
+          Given PARALLEL=1
+          When the turn prompt is built
+          Then it contains the no-stash instruction
+          Given PARALLEL=0
+          Then the prompt is unchanged
+      verify: bash test/selftest.sh   (prompt contains/omits the line by mode)
+      constraints: prompt text only; protocol markers unchanged; additive.
+
+- [ ] T8.3 (hard) fanout orchestrator: serial worktree creation, parallel loops
+      touches: bin/ratchet, lib/commands.sh, lib/tracker.sh
+      do: New `ratchet fanout [REPO]` subcommand. Requires PARALLEL=1 + gh +
+          origin. Steps, in order:
+          (1) Parse the tracker for milestones whose FIRST open task carries an
+              `(independent)` tag (new tag, additive to the tag grammar in
+              tracker.sh) — only these may run concurrently; untagged milestones
+              stay serial. `fanout_independent_milestones()` echoes their
+              names/slugs.
+          (2) SERIALLY (config.lock race is at creation): for each, `git
+              worktree add ../ratchet-wt-<slug> -b ratchet/m-<slug>
+              origin/<default>`. On the lock error, retry w/ backoff (5x, 1s
+              doubling) — the documented workaround. Record created paths in
+              .ratchet/fanout.state (one path<TAB>branch per line).
+          (3) Fan out: `(cd <wt> && PARALLEL=1 ratchet run) &` per worktree,
+              bounded by a FANOUT_MAX (default 4) concurrency cap; `wait` for
+              all. Each loop is fully isolated (own working dir, own
+              .ratchet/, own LOG_DIR slug — project_slug already keys on path).
+          (4) On completion, call fanout_clean (T8.4).
+      accept:
+          Given a tracker with 2 (independent)-tagged milestones, stub gh/git
+          When ratchet fanout runs
+          Then 2 worktrees are created serially on ratchet/m-* branches, 2
+          loops run, and fanout.state lists both paths
+          Given no (independent) tags
+          Then fanout runs nothing and prints a clear "no independent
+          milestones" message
+      verify: bash test/selftest.sh   (stubbed: serial-create order, state
+          file, concurrency cap; retry-on-lock path)
+      constraints: creation SERIAL (never parallel worktree add); PARALLEL=0
+          repos never enter this path; no `gh pr merge`.
+
+- [ ] T8.4 (hard) fanout_clean: fail-safe worktree sweep + prune hook
+      touches: bin/ratchet, lib/commands.sh, README.md
+      do: `ratchet fanout-clean [REPO]` + a `git worktree prune` call at the
+          START of every `ratchet run` (cheap; only drops already-gone admin
+          entries — anti-bloat with no cron). The sweep, per worktree in `git
+          worktree list --porcelain` (skip the primary):
+            GUARD 1 (shared stash): if `git stash list` has a `(WIP )?[Oo]n
+              <branch>:` entry → KEEP (the Trap-3 data-loss bug).
+            GUARD 2 (unpushed): if `git -C <wt> log --branches --not --remotes`
+              is non-empty → KEEP.
+            Then `git worktree remove <wt>` — NEVER `--force`: git's own
+              refusal of dirty trees IS the backstop (it's what actually saved
+              50 worktrees in the field report, not any classifier). On success
+              `git branch -D <branch>`; drop the line from .ratchet/fanout.state.
+          EVERY gate that cannot answer (grep/git error) must fall through to
+          KEEP — a deletion gate returns the data-preserving answer on failure.
+      accept:
+          Given a worktree whose branch appears in the shared stash
+          Then fanout-clean KEEPS it (never removed)
+          Given a clean, pushed, merged worktree
+          Then fanout-clean removes it and deletes its branch
+          Given a dirty worktree
+          Then `git worktree remove` (no --force) refuses and it is KEPT
+      verify: bash test/selftest.sh   (fixture: stash-guard keep, dirty-refuse
+          keep, clean-merged sweep, prune drops stale entry)
+      constraints: NEVER --force; all gates fail toward KEEP; prune is
+          idempotent. `ponytail: coarse per-repo sweep, upgrade path = age-based
+          retention if worktrees outlive their PRs.`
+
 ## Non-goals
-- Parallel milestones / worktrees while a PR awaits merge (future; requires
-  planner `(independent)` tags + worktree isolation).
+- Cross-worktree work-stealing / dynamic rebalancing (M8 is static: one
+  independent milestone per worktree, fixed at fanout time).
+- Automatic conflict resolution when independent milestones touch the same
+  files (the `(independent)` tag is a human assertion; overlapping edits
+  surface as PR merge conflicts, resolved by the human at merge — the gate).
 - Harness-side subagent orchestration (the agent's own subagent tool covers
   fan-out review).
 - Stacked PRs (`gh pr create --base <prev>`) — explicitly rejected; the
