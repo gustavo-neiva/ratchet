@@ -70,6 +70,10 @@ DONE_TOKEN=ALL_DONE
 # PR size soft warning threshold (changed lines). Default: 400. Warning only, never blocks.
 #PR_SOFT_MAX_LINES=400
 
+# Parallel worktree mode: 0 = serial (default, ff's default branch on merge),
+# 1 = parallel (stay on milestone branch, no checkout/pull). For N concurrent loops.
+#PARALLEL=0
+
 # Human-notify command (PR-gated flow). NOT recognized here — ratchet rejects it
 # as an unknown key to keep an attacker-controlled repo conf from running a
 # command. Set it ONLY in the trusted, sourced GLOBAL conf (~/.ratchet/conf):

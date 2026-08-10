@@ -454,7 +454,7 @@ VERIFY_CMD: bash test/selftest.sh
 > serializes the few shared WRITES and never checks out the default branch off
 > a parallel loop.
 
-- [ ] T8.1 (normal) PARALLEL mode: on-branch loop, never checkout default branch
+- [x] T8.1 (normal) PARALLEL mode: on-branch loop, never checkout default branch
       touches: bin/ratchet, lib/common.sh, lib/contract.sh, templates/ratchet.conf.example
       do: Add PARALLEL default 0 in common.sh + allowlist PARALLEL in
           CONTRACT_KEYS (numeric). When PARALLEL=1, `wait_for_merge` must NOT
@@ -476,7 +476,7 @@ VERIFY_CMD: bash test/selftest.sh
           serial path still checks out+ff's main)
       constraints: additive; PARALLEL=0 default path unchanged. No `gh pr merge`.
 
-- [ ] T8.2 (normal) forbid git stash in parallel mode (shared-stash guard)
+- [IN PROGRESS] T8.2 (normal) forbid git stash in parallel mode (shared-stash guard)
       touches: templates/AGENTS.md (protocol), lib/common.sh (proto text)
       do: `refs/stash` is shared across worktrees, so an agent stash in one
           worktree is visible/poppable in another. Ratchet already commits only

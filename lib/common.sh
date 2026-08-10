@@ -63,6 +63,7 @@ THINKING_REVIEW=""              # thinking level for REVIEW tier (unset → THIN
 
 # --- fanout strategy (v1.1, default off) ---
 FANOUT=""                       # off|scout|scout+review (empty = off). Enables subagent tool on (hard) tasks.
+PARALLEL=0                      # 0 = serial mode (default); 1 = parallel worktree mode (stay on milestone branch)
 
 # --- token economy (quota saving) ---
 RESUME_SESSION=0                # 0 = EPHEMERAL turns (tracker = memory, cheap). 1 = resume one session.

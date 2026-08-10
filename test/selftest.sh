@@ -2291,6 +2291,7 @@ unset NOTIFY_CMD
 # Suite 30: wait_for_merge (T3.2) — poll PR until merged/closed/timeout.
 # =============================================================================
 echo "Suite 30: wait_for_merge (T3.2)"
+_suite30_saved_path="$PATH"
 
 # Define wait_for_merge inline (from bin/ratchet). emit + notify_human already
 # sourced from observability.sh above.
@@ -2325,6 +2326,9 @@ wait_for_merge() {
     fi
     case "$state" in
       MERGED)
+        if [ "$PARALLEL" = 1 ]; then
+          return 0  # parallel mode: stay on milestone branch, no checkout/pull
+        fi
         git checkout "$default_branch" >>"$LOOP_LOG" 2>&1 || return 1
         git pull --ff-only >>"$LOOP_LOG" 2>&1 || return 1
         return 0
@@ -2400,6 +2404,7 @@ else
 fi
 cd - >/dev/null
 rm -rf "$tmpdir"
+hash -r  # drop bash's cached path to the just-deleted git stub (else next git init ENOENTs)
 
 # Test 2: CLOSED path — returns 1, emits HUMAN NEEDED.
 tmpdir="$(mktemp -d)"
@@ -2435,6 +2440,7 @@ else
 fi
 cd - >/dev/null
 rm -rf "$tmpdir"
+hash -r
 
 # Test 3: timeout path — returns 3, emits HUMAN NEEDED + clean exit message.
 tmpdir="$(mktemp -d)"
@@ -2473,6 +2479,7 @@ else
 fi
 cd - >/dev/null
 rm -rf "$tmpdir"
+hash -r
 
 # Test 4: no gh — returns 2 (manual mode), emits HUMAN NEEDED.
 tmpdir="$(mktemp -d)"
@@ -2515,6 +2522,110 @@ else
 fi
 cd - >/dev/null
 rm -rf "$tmpdir"
+
+# Test 6: PARALLEL=1 — stays on milestone branch, no checkout/pull on MERGED.
+tmpdir="$(mktemp -d)"
+mkdir -p "$tmpdir/.git/refs/remotes/origin" "$tmpdir/bin"
+cd "$tmpdir"
+git init -q
+git config user.name "test"
+git config user.email "test@test"
+printf 'ref: refs/remotes/origin/main\n' > .git/refs/remotes/origin/HEAD
+touch file; git add file; git commit -qm "init"
+git branch -M main
+git checkout -q -b milestone-branch
+git remote add origin fake://origin
+cat > bin/gh <<'GHSTUB'
+#!/usr/bin/env bash
+case "$*" in
+  *"--json state -q .state"*|*"--json state"*)
+    marker="$PWD/.gh_call_count"
+    count=$(cat "$marker" 2>/dev/null || echo 0)
+    count=$((count + 1))
+    echo "$count" > "$marker"
+    if [ "$count" -eq 1 ]; then
+      if [[ "$*" == *"-q"* ]]; then echo "OPEN"; else echo '{"state":"OPEN"}'; fi
+    else
+      if [[ "$*" == *"-q"* ]]; then echo "MERGED"; else echo '{"state":"MERGED"}'; fi
+    fi
+    ;;
+esac
+GHSTUB
+chmod +x bin/gh
+export PATH="$tmpdir/bin:$PATH"
+export LOOP_LOG="$tmpdir/loop.log"
+export MERGE_POLL_SECS=1
+export PARALLEL=1
+current_branch=$(git rev-parse --abbrev-ref HEAD)
+if wait_for_merge milestone-branch; then
+  after_branch=$(git rev-parse --abbrev-ref HEAD)
+  if [ "$after_branch" = "milestone-branch" ] && [ ! -f "$tmpdir/bin/git" ]; then
+    ok "wait_for_merge PARALLEL=1: stays on milestone branch, no checkout/pull"
+  else
+    fail "wait_for_merge PARALLEL=1: branch changed to $after_branch or git stub was called"
+  fi
+else
+  fail "wait_for_merge PARALLEL=1: returned non-zero"
+fi
+cd - >/dev/null
+rm -rf "$tmpdir"
+hash -r
+
+# Test 7: PARALLEL=0 (default) — checks out main, ff-only pull (byte-identical to old behavior).
+tmpdir="$(mktemp -d)"
+mkdir -p "$tmpdir/.git/refs/remotes/origin" "$tmpdir/bin"
+cd "$tmpdir"
+git init -q
+git config user.name "test"
+git config user.email "test@test"
+printf 'ref: refs/remotes/origin/main\n' > .git/refs/remotes/origin/HEAD
+touch file; git add file; git commit -qm "init"
+git branch -M main
+git checkout -q -b feature-branch
+git remote add origin fake://origin
+cat > bin/gh <<'GHSTUB'
+#!/usr/bin/env bash
+case "$*" in
+  *"--json state -q .state"*|*"--json state"*)
+    marker="$PWD/.gh_call_count"
+    count=$(cat "$marker" 2>/dev/null || echo 0)
+    count=$((count + 1))
+    echo "$count" > "$marker"
+    if [ "$count" -eq 1 ]; then
+      if [[ "$*" == *"-q"* ]]; then echo "OPEN"; else echo '{"state":"OPEN"}'; fi
+    else
+      if [[ "$*" == *"-q"* ]]; then echo "MERGED"; else echo '{"state":"MERGED"}'; fi
+    fi
+    ;;
+esac
+GHSTUB
+chmod +x bin/gh
+cat > bin/git <<'GITSTUB'
+#!/usr/bin/env bash
+case "$1" in
+  checkout) echo "checkout $2" >> "$PWD/git_calls.log"; exit 0 ;;
+  pull) echo "pull $*" >> "$PWD/git_calls.log"; exit 0 ;;
+  *) exec /usr/bin/git "$@" ;;
+esac
+GITSTUB
+chmod +x bin/git
+export PATH="$tmpdir/bin:$PATH"
+export LOOP_LOG="$tmpdir/loop.log"
+export MERGE_POLL_SECS=1
+export PARALLEL=0
+if wait_for_merge feature-branch; then
+  if grep -q "checkout main" "$tmpdir/git_calls.log" && grep -q "pull --ff-only" "$tmpdir/git_calls.log"; then
+    ok "wait_for_merge PARALLEL=0: checks out main and ff-only pulls (serial path)"
+  else
+    fail "wait_for_merge PARALLEL=0: git checkout/pull not called correctly"
+  fi
+else
+  fail "wait_for_merge PARALLEL=0: returned non-zero"
+fi
+cd - >/dev/null
+rm -rf "$tmpdir"
+export PATH="$_suite30_saved_path"
+hash -r
 
 # =============================================================================
 # Suite 31: plan_is_ready (T4.1) — detect when tracker is ready.

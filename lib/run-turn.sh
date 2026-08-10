@@ -13,6 +13,7 @@
 
 TURN_STATUS=""
 TURN_EXIT_CODE=0
+TURN_KILL_REASON=""   # deadline-Ns | stall-Ns | token-seen — why the watchdog broke
 
 # bounded_reap PID -> returns within ~10s regardless of child state, stores exit code in TURN_EXIT_CODE
 # Polls kill -0 for up to 10s, then detaches if still alive (OS reaps orphan later)
@@ -139,6 +140,7 @@ run_turn() {
   # `transient` (a network blip / empty reply) — keeps stats honest.
   local deadline=0
   case "$reason" in deadline-*|stall-*) deadline=1;; esac
+  TURN_KILL_REASON="$reason"
   TURN_STATUS="$(classify_turn "$TURN_OUT" "$STEP_TOKEN" "$DONE_TOKEN" "$deadline" "$pi_json")"
   vlog "turn classified: $TURN_STATUS"
 }

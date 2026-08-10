@@ -37,7 +37,10 @@ _err_scan_src() {  # FILE JSON -> lines the error-matchers may look at
 # and the generic "rate limit / quota / too many requests" family. -> bench model.
 _is_exhausted() {  # FILE JSON
   # \\? before quotes: json-mode streams JSON-escape provider errors (\"code\":\"1308\").
-  _err_scan_src "$1" "${2:-0}" | grep -qiE '(request failed: HTTP (429|503|529))|(auto_retry.{0,40}429)|(\\?"code\\?"[[:space:]]*:[[:space:]]*\\?"?130[2-8])|(rate_limit_error|overloaded_error)|(rate[ _-]?limit)|(quota)|(usage limit reached)|(insufficient.{0,30}(balance|quota|credit))|(daily.{0,15}(limit|quota))|(too many requests)|(exceed(ed|s)?.{0,15}(quota|limit|balance|rate))' 2>/dev/null
+  # "extra usage" is Anthropic's soft usage nudge — HTTP 400 invalid_request_error
+  # by shape, but semantically "quota, retry later", NOT a broken config. Match it
+  # here so it benches-with-cooldown instead of striking toward a permanent bench.
+  _err_scan_src "$1" "${2:-0}" | grep -qiE '(request failed: HTTP (429|503|529))|(auto_retry.{0,40}429)|(\\?"code\\?"[[:space:]]*:[[:space:]]*\\?"?130[2-8])|(rate_limit_error|overloaded_error)|(rate[ _-]?limit)|(quota)|(usage limit reached)|(draw from your extra usage)|(insufficient.{0,30}(balance|quota|credit))|(daily.{0,15}(limit|quota))|(too many requests)|(exceed(ed|s)?.{0,15}(quota|limit|balance|rate))' 2>/dev/null
 }
 
 # Hard errors: auth, permission, not-found, bad request, context length, model unavailable. -> strike (then bench).
