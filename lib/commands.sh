@@ -574,10 +574,154 @@ cmd_fanout() {
   
   emit "  all loops complete"
   
-  # Step 4: Call fanout_clean (T8.4, not yet implemented)
-  # cmd_fanout_clean "$dir"
+  # Step 4: Sweep completed worktrees
+  cmd_fanout_clean "$dir"
   
   emit "fanout complete"
+}
+
+# ----------------------------- ratchet fanout-clean --------------------------
+# Fail-safe worktree cleanup: remove pushed+merged worktrees, KEEP dirty/unpushed/stashed.
+# ponytail: coarse per-repo sweep, upgrade path = age-based retention if worktrees outlive their PRs.
+cmd_fanout_clean() {
+  local dir="$1"
+  [ -n "$dir" ] || dir="$PWD"
+  [ -d "$dir" ] || die "not a directory: $dir"
+  
+  emit "fanout-clean: $dir"
+  cd "$dir" || die "cannot cd into $dir"
+  
+  local state_file=".ratchet/fanout.state"
+  local wt_list removed_count=0 kept_count=0 is_first=1
+  
+  # Get worktree list
+  wt_list=$(git worktree list --porcelain 2>/dev/null || echo "")
+  
+  [ -z "$wt_list" ] && { emit "  no worktrees found"; return 0; }
+  
+  # Process each worktree (porcelain: worktree <path>\n HEAD <sha>\n branch <ref>\n\n)
+  # First entry is always the primary worktree; skip it
+  local wt_path="" wt_branch=""
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *)
+        # Start of worktree block
+        wt_path="${line#worktree }"
+        wt_branch=""
+        ;;
+      branch\ *)
+        # Branch ref line
+        wt_branch="${line#branch }"
+        wt_branch="${wt_branch#refs/heads/}"
+        ;;
+      "")
+        # End of block
+        [ -z "$wt_path" ] && continue
+        # Skip primary (first entry)
+        if [ "$is_first" -eq 1 ]; then
+          is_first=0
+          wt_path=""
+          wt_branch=""
+          continue
+        fi
+        # Skip entries without a branch
+        [ -z "$wt_branch" ] && { wt_path=""; wt_branch=""; continue; }
+        
+        # GUARD 1: shared stash check — fail toward KEEP
+        if git stash list 2>/dev/null | grep -qE "(WIP )?[Oo]n ${wt_branch}:" 2>/dev/null; then
+          emit "  KEEP: $wt_path (stash entry exists for $wt_branch)"
+          kept_count=$((kept_count + 1))
+          continue
+        fi
+        if ! git stash list >/dev/null 2>&1; then
+          emit "  KEEP: $wt_path (stash check failed, fail toward KEEP)"
+          kept_count=$((kept_count + 1))
+          continue
+        fi
+        
+        # GUARD 2: unpushed commits — fail toward KEEP
+        local unpushed
+        unpushed=$(git -C "$wt_path" log --branches --not --remotes 2>/dev/null || echo "ERROR")
+        if [ "$unpushed" = "ERROR" ]; then
+          emit "  KEEP: $wt_path (unpushed check failed, fail toward KEEP)"
+          kept_count=$((kept_count + 1))
+          continue
+        fi
+        if [ -n "$unpushed" ]; then
+          emit "  KEEP: $wt_path (unpushed commits)"
+          kept_count=$((kept_count + 1))
+          continue
+        fi
+        
+        # Try removal (NEVER --force; git's dirty-tree refusal is the backstop)
+        if git worktree remove "$wt_path" 2>"$LOG_DIR/wt-remove.err"; then
+          emit "  REMOVED: $wt_path"
+          removed_count=$((removed_count + 1))
+          # Delete branch
+          if git branch -D "$wt_branch" >>"$LOG_DIR" 2>&1; then
+            emit "    deleted branch $wt_branch"
+          fi
+          # Remove from state file
+          if [ -f "$state_file" ]; then
+            grep -v "^${wt_path}	" "$state_file" > "${state_file}.tmp" 2>/dev/null || true
+            mv "${state_file}.tmp" "$state_file" 2>/dev/null || true
+          fi
+        else
+          # git refused (dirty tree, etc.) — KEEP
+          emit "  KEEP: $wt_path (git worktree remove refused)"
+          kept_count=$((kept_count + 1))
+        fi
+        
+        # Reset for next block
+        wt_path=""
+        wt_branch=""
+        ;;
+    esac
+  done < <(printf '%s\n' "$wt_list")
+  
+  # Process any remaining worktree (in case list doesn't end with blank line)
+  if [ -n "$wt_path" ] && [ "$is_first" -eq 0 ] && [ -n "$wt_branch" ]; then
+    # GUARD 1: shared stash check — fail toward KEEP
+    if git stash list 2>/dev/null | grep -qE "(WIP )?[Oo]n ${wt_branch}:" 2>/dev/null; then
+      emit "  KEEP: $wt_path (stash entry exists for $wt_branch)"
+      kept_count=$((kept_count + 1))
+    elif ! git stash list >/dev/null 2>&1; then
+      emit "  KEEP: $wt_path (stash check failed, fail toward KEEP)"
+      kept_count=$((kept_count + 1))
+    else
+      # GUARD 2: unpushed commits — fail toward KEEP
+      local unpushed
+      unpushed=$(git -C "$wt_path" log --branches --not --remotes 2>/dev/null || echo "ERROR")
+      if [ "$unpushed" = "ERROR" ]; then
+        emit "  KEEP: $wt_path (unpushed check failed, fail toward KEEP)"
+        kept_count=$((kept_count + 1))
+      elif [ -n "$unpushed" ]; then
+        emit "  KEEP: $wt_path (unpushed commits)"
+        kept_count=$((kept_count + 1))
+      else
+        # Try removal (NEVER --force; git's dirty-tree refusal is the backstop)
+        if git worktree remove "$wt_path" 2>"$LOG_DIR/wt-remove.err"; then
+          emit "  REMOVED: $wt_path"
+          removed_count=$((removed_count + 1))
+          # Delete branch
+          if git branch -D "$wt_branch" >>"$LOG_DIR" 2>&1; then
+            emit "    deleted branch $wt_branch"
+          fi
+          # Remove from state file
+          if [ -f "$state_file" ]; then
+            grep -v "^${wt_path}	" "$state_file" > "${state_file}.tmp" 2>/dev/null || true
+            mv "${state_file}.tmp" "$state_file" 2>/dev/null || true
+          fi
+        else
+          # git refused (dirty tree, etc.) — KEEP
+          emit "  KEEP: $wt_path (git worktree remove refused)"
+          kept_count=$((kept_count + 1))
+        fi
+      fi
+    fi
+  fi
+  
+  emit "fanout-clean: removed=$removed_count kept=$kept_count"
 }
 
 # ----------------------------- ratchet doctor --------------------------------

@@ -528,7 +528,7 @@ VERIFY_CMD: bash test/selftest.sh
       constraints: creation SERIAL (never parallel worktree add); PARALLEL=0
           repos never enter this path; no `gh pr merge`.
 
-- [IN PROGRESS] T8.4 (hard) fanout_clean: fail-safe worktree sweep + prune hook
+- [x] T8.4 (hard) fanout_clean: fail-safe worktree sweep + prune hook
       touches: bin/ratchet, lib/commands.sh, README.md
       do: `ratchet fanout-clean [REPO]` + a `git worktree prune` call at the
           START of every `ratchet run` (cheap; only drops already-gone admin

@@ -275,7 +275,16 @@ today's behavior. See `templates/ratchet.conf.example` for commented examples.
 
 ### One turn at a time (safe default)
 
-The loop runs **one turn, one commit** — sequential, green-gated, easy to bisect/revert. Parallel turns (`--parallel N`) are opt-in for tasks the tracker marks non-`serial`, each in an isolated `git worktree`. Concurrent writers over a shared tree are never safe.
+The loop runs **one turn, one commit** — sequential, green-gated, easy to bisect/revert.
+
+**Parallel fanout (Milestone 8):** When `PARALLEL=1`, `ratchet fanout` runs independent milestones concurrently in isolated git worktrees (one per milestone). Tag a milestone's first open task with `(independent)` to opt in. Each worktree runs its own `ratchet run` loop; creation is serial (to avoid `config.lock` races), execution is concurrent (bounded by `FANOUT_MAX`, default 4).
+
+`ratchet fanout-clean` sweeps completed worktrees after fanout, removing clean+pushed+merged trees while KEEPING:
+- Trees with stash entries (shared stash hazard)
+- Trees with unpushed commits
+- Dirty trees (git refuses removal without `--force`, which we never use)
+
+Every gate that cannot answer (grep/git error) fails toward KEEP. `git worktree prune` runs automatically at the start of every `ratchet run` to drop stale admin entries. **ponytail:** coarse per-repo sweep; upgrade path = age-based retention if worktrees outlive their PRs.
 
 ### Token economy
 
@@ -458,15 +467,17 @@ for t in python go rustc cargo elixir mix ruby bundle node; do command -v "$t"; 
 ## Commands
 
 ```
-run    [REPO]   Run until ALL_DONE (default)
-once   [REPO]   One turn, then exit (testing/debugging)
-init   [REPO]   Stamp protocol files (existing repo)
-new    "<idea>" Scaffold repo, draft plan, STOP for review
-doctor [REPO]   Preflight checks
-selftest        Verify logic against fixtures (no API calls)
-stats   [REPO]  Parse loop.log and print metrics
-watch   [REPO]  Pretty-print live session JSONL (2nd terminal)
-models          List/add/remove/validate model chains (--tier, --pos, --repo)
+run          [REPO]   Run until ALL_DONE (default)
+once         [REPO]   One turn, then exit (testing/debugging)
+init         [REPO]   Stamp protocol files (existing repo)
+new          "<idea>" Scaffold repo, draft plan, STOP for review
+doctor       [REPO]   Preflight checks
+selftest              Verify logic against fixtures (no API calls)
+stats        [REPO]   Parse loop.log and print metrics
+watch        [REPO]   Pretty-print live session JSONL (2nd terminal)
+models                List/add/remove/validate model chains (--tier, --pos, --repo)
+fanout       [REPO]   Parallel fanout: run independent milestones concurrently
+fanout-clean [REPO]   Sweep completed worktrees (fail-safe, keeps dirty/unpushed/stashed)
 ```
 
 ## Options
