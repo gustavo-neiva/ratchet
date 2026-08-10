@@ -271,3 +271,42 @@ tracker_current_milestone() {
     END { if (found) print name "\t" idx "\t" mtotal "\t" mdone "\t" mtotal }
   ' "$file"
 }
+
+# fanout_independent_milestones -> echoes "name<TAB>slug" for each milestone whose
+# FIRST open task is tagged (independent). Empty when no independent milestones exist.
+fanout_independent_milestones() {
+  local file="$REPO_DIR/$TRACKER_FILE"
+  [ -f "$file" ] || return 0
+  awk '
+    BEGIN { name=""; first_task_line="" }
+    /^## / {
+      # Process previous milestone if it had an independent first task
+      if (name != "" && first_task_line != "" && first_task_line ~ /\(independent[,)]/) {
+        slug = name
+        gsub(/[^A-Za-z0-9_-]/, "-", slug)
+        gsub(/-+/, "-", slug)
+        gsub(/^-+|-+$/, "", slug)
+        print name "\t" slug
+      }
+      # Start new milestone
+      name = $0; sub(/^## /, "", name)
+      first_task_line = ""
+      next
+    }
+    /^[[:space:]]*-[[:space:]]*\[ \]/ {
+      # Found an open task — if this is the first, record it
+      if (first_task_line == "") first_task_line = $0
+      next
+    }
+    END {
+      # Process final milestone
+      if (name != "" && first_task_line != "" && first_task_line ~ /\(independent[,)]/) {
+        slug = name
+        gsub(/[^A-Za-z0-9_-]/, "-", slug)
+        gsub(/-+/, "-", slug)
+        gsub(/^-+|-+$/, "", slug)
+        print name "\t" slug
+      }
+    }
+  ' "$file"
+}

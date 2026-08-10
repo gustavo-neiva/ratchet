@@ -496,7 +496,7 @@ VERIFY_CMD: bash test/selftest.sh
       verify: bash test/selftest.sh   (prompt contains/omits the line by mode)
       constraints: prompt text only; protocol markers unchanged; additive.
 
-- [IN PROGRESS] T8.3 (hard) fanout orchestrator: serial worktree creation, parallel loops
+- [x] T8.3 (hard) fanout orchestrator: serial worktree creation, parallel loops
       touches: bin/ratchet, lib/commands.sh, lib/tracker.sh
       do: New `ratchet fanout [REPO]` subcommand. Requires PARALLEL=1 + gh +
           origin. Steps, in order:
@@ -528,7 +528,7 @@ VERIFY_CMD: bash test/selftest.sh
       constraints: creation SERIAL (never parallel worktree add); PARALLEL=0
           repos never enter this path; no `gh pr merge`.
 
-- [ ] T8.4 (hard) fanout_clean: fail-safe worktree sweep + prune hook
+- [IN PROGRESS] T8.4 (hard) fanout_clean: fail-safe worktree sweep + prune hook
       touches: bin/ratchet, lib/commands.sh, README.md
       do: `ratchet fanout-clean [REPO]` + a `git worktree prune` call at the
           START of every `ratchet run` (cheap; only drops already-gone admin

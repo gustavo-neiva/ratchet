@@ -46,7 +46,7 @@ pre_scan() {
       -p|--prompt|-s|--session|-m|--models|--thinking|--turn-timeout|--cooldown|\
       --both-wait|--step-token|--done-token|--verify-cmd|--agent-cmd|\
       --cache-retention|--tail|--heartbeat) shift 2;;
-      init|new|plan|doctor|run|once|selftest|stats|watch|status|models)
+      init|new|plan|doctor|run|once|selftest|stats|watch|status|models|fanout)
         [ -z "$COMMAND" ] && COMMAND="$1"; shift;;
       -*) shift;;
       *)
@@ -96,7 +96,7 @@ parse_args() {
       -v|--verbose)     VERBOSE=1; shift;;
       -h|--help)        usage; exit 0;;
       --) shift; break;;
-      init|new|plan|doctor|run|once|selftest|stats|watch|status) COMMAND="$1"; shift;;
+      init|new|plan|doctor|run|once|selftest|stats|watch|status|fanout) COMMAND="$1"; shift;;
       -*) die "unknown option: $1 (see --help)";;
       *)
         if [ "$COMMAND" = "new" ] && [ -z "$PROMPT_OVERRIDE" ]; then
@@ -359,6 +359,7 @@ main() {
     stats)   init_models "$MODELS"; cmd_stats; exit $? ;;
     watch)   init_models "$MODELS"; watch_session; exit $? ;;
     status)  cmd_status; exit $? ;;
+    fanout)  cmd_fanout "$REPO_DIR"; exit $? ;;
   esac
 
   # run / once: doctor preflight first (fail before the first turn, not turn 3).

@@ -458,6 +458,128 @@ cmd_status() {
   printf 'Log: %s\n' "$log"
 }
 
+# ----------------------------- ratchet fanout --------------------------------
+# Parallel fanout: serial worktree creation + parallel ratchet run loops.
+cmd_fanout() {
+  local dir="$1"
+  [ -n "$dir" ] || dir="$PWD"
+  [ -d "$dir" ] || die "not a directory: $dir"
+  
+  # Require PARALLEL=1
+  if [ "${PARALLEL:-0}" -ne 1 ]; then
+    emit "fanout requires PARALLEL=1 (set in .ratchet.conf or via env)"
+    return 1
+  fi
+  
+  # Require gh + origin
+  if ! command -v gh >/dev/null 2>&1; then
+    emit "fanout requires gh (GitHub CLI) on PATH"
+    return 1
+  fi
+  if ! git -C "$dir" remote get-url origin >/dev/null 2>&1; then
+    emit "fanout requires an 'origin' remote"
+    return 1
+  fi
+  
+  emit "ratchet fanout: $dir"
+  cd "$dir" || die "cannot cd into $dir"
+  
+  # Parse tracker for independent milestones
+  TRACKER_FILE="${TRACKER_FILE:-$(detect_tracker_file "$dir")}"
+  [ -n "$TRACKER_FILE" ] || TRACKER_FILE="PLAN.md"
+  REPO_DIR="$dir"
+  
+  local milestones; milestones=$(fanout_independent_milestones)
+  if [ -z "$milestones" ]; then
+    emit "no independent milestones found (tag first open task with (independent))"
+    return 0
+  fi
+  
+  local count; count=$(echo "$milestones" | wc -l | tr -d ' ')
+  emit "  found $count independent milestone(s)"
+  
+  # Detect default branch
+  local default_branch; default_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|^refs/remotes/origin/||')
+  [ -z "$default_branch" ] && default_branch="main"
+  
+  # State file for tracking worktrees
+  mkdir -p .ratchet
+  local state_file=".ratchet/fanout.state"
+  : > "$state_file"
+  
+  # Step 2: SERIALLY create worktrees (config.lock race at creation)
+  local mname slug wt_path branch
+  while IFS=$'\t' read -r mname slug; do
+    wt_path="../ratchet-wt-$slug"
+    branch="ratchet/m-$slug"
+    
+    emit "  creating worktree: $wt_path (branch $branch)"
+    
+    # Retry loop for config.lock race (5 attempts, 1s doubling backoff)
+    local attempt=1 max_attempts=5 wait=1 created=0
+    while [ $attempt -le $max_attempts ]; do
+      if git worktree add "$wt_path" -b "$branch" "origin/$default_branch" 2>"$LOG_DIR/wt.err"; then
+        created=1
+        break
+      fi
+      
+      # Check if it's a lock error
+      if grep -q 'config.lock' "$LOG_DIR/wt.err" 2>/dev/null; then
+        emit "    config.lock (attempt $attempt/$max_attempts); waiting ${wait}s"
+        sleep "$wait"
+        wait=$((wait * 2))
+        attempt=$((attempt + 1))
+      else
+        # Some other error
+        emit "    worktree add failed:"
+        cat "$LOG_DIR/wt.err" >&2
+        return 1
+      fi
+    done
+    
+    if [ $created -eq 0 ]; then
+      emit "    failed to create worktree after $max_attempts attempts"
+      return 1
+    fi
+    
+    # Record in state file
+    printf '%s\t%s\n' "$wt_path" "$branch" >> "$state_file"
+  done <<< "$milestones"
+  
+  emit "  all worktrees created"
+  
+  # Step 3: Fan out parallel loops, bounded by FANOUT_MAX
+  local -a pids=()
+  local active=0
+  
+  while IFS=$'\t' read -r wt_path branch; do
+    # Wait if at concurrency cap
+    while [ $active -ge "${FANOUT_MAX:-4}" ]; do
+      wait -n 2>/dev/null || wait
+      active=$((active - 1))
+    done
+    
+    # Launch loop in background
+    emit "  launching loop: $wt_path"
+    ( cd "$wt_path" && PARALLEL=1 "$RATCHET_ROOT/bin/ratchet" run ) &
+    pids+=("$!")
+    active=$((active + 1))
+  done < "$state_file"
+  
+  # Wait for all
+  emit "  waiting for all loops to complete"
+  for pid in "${pids[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+  
+  emit "  all loops complete"
+  
+  # Step 4: Call fanout_clean (T8.4, not yet implemented)
+  # cmd_fanout_clean "$dir"
+  
+  emit "fanout complete"
+}
+
 # ----------------------------- ratchet doctor --------------------------------
 # Fast static checks (<1s, auto before every run) + optional deep checks.
 cmd_doctor() {
