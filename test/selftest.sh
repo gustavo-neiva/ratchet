@@ -3459,6 +3459,35 @@ case "$first_line" in
 esac
 rm -rf "$tmpdir"
 
+# =============================================================================
+# Suite 36: parallel stash guard (T8.2) — prompt forbids git stash when PARALLEL=1.
+# =============================================================================
+echo "Suite 36: parallel stash guard (T8.2)"
+
+# Test 1: PARALLEL=1 → protocol contains no-stash instruction
+tmpdir="$(mktemp -d)"
+cp "$RR/templates/AGENTS.protocol.md" "$tmpdir/template.md"
+export PARALLEL=1
+export RATCHET_ROOT="$RR"
+proto_out="$(expected_protocol_block "PLAN.md" "bash test.sh" "STEP_COMPLETE" "ALL_DONE" 2>&1)"
+if printf '%s' "$proto_out" | grep -q 'NEVER run.*git stash.*shared across parallel worktrees'; then
+  ok "PARALLEL=1: protocol contains no-stash instruction"
+else
+  fail "PARALLEL=1: protocol missing no-stash instruction: $proto_out"
+fi
+rm -rf "$tmpdir"
+
+# Test 2: PARALLEL=0 → protocol unchanged (no stash instruction)
+tmpdir="$(mktemp -d)"
+export PARALLEL=0
+proto_out="$(expected_protocol_block "PLAN.md" "bash test.sh" "STEP_COMPLETE" "ALL_DONE" 2>&1)"
+if printf '%s' "$proto_out" | grep -q 'git stash'; then
+  fail "PARALLEL=0: protocol should not mention git stash"
+else
+  ok "PARALLEL=0: protocol unchanged (no stash warning)"
+fi
+rm -rf "$tmpdir"
+
 echo ""
 echo "selftest: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

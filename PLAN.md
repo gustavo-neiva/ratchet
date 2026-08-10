@@ -476,7 +476,7 @@ VERIFY_CMD: bash test/selftest.sh
           serial path still checks out+ff's main)
       constraints: additive; PARALLEL=0 default path unchanged. No `gh pr merge`.
 
-- [IN PROGRESS] T8.2 (normal) forbid git stash in parallel mode (shared-stash guard)
+- [x] T8.2 (normal) forbid git stash in parallel mode (shared-stash guard)
       touches: templates/AGENTS.md (protocol), lib/common.sh (proto text)
       do: `refs/stash` is shared across worktrees, so an agent stash in one
           worktree is visible/poppable in another. Ratchet already commits only
@@ -496,7 +496,7 @@ VERIFY_CMD: bash test/selftest.sh
       verify: bash test/selftest.sh   (prompt contains/omits the line by mode)
       constraints: prompt text only; protocol markers unchanged; additive.
 
-- [ ] T8.3 (hard) fanout orchestrator: serial worktree creation, parallel loops
+- [IN PROGRESS] T8.3 (hard) fanout orchestrator: serial worktree creation, parallel loops
       touches: bin/ratchet, lib/commands.sh, lib/tracker.sh
       do: New `ratchet fanout [REPO]` subcommand. Requires PARALLEL=1 + gh +
           origin. Steps, in order:

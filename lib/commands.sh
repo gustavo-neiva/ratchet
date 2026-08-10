@@ -27,11 +27,16 @@ detect_verify_cmd() {
 # expected_protocol_block TRACKER VERIFY STEP DONE -> render the protocol block
 # with live conf values. Used by build_default_prompt for per-turn injection.
 expected_protocol_block() {
-  local tr="$1" vc="$2" st="$3" dt="$4" tpl
+  local tr="$1" vc="$2" st="$3" dt="$4" tpl proto
   tpl="$RATCHET_ROOT/templates/AGENTS.protocol.md"
   [ -f "$tpl" ] || die "template missing: $tpl"
-  sed -e "s|{{TRACKER_FILE}}|$tr|g" -e "s|{{VERIFY_CMD}}|$vc|g" \
-      -e "s|{{STEP_TOKEN}}|$st|g" -e "s|{{DONE_TOKEN}}|$dt|g" "$tpl"
+  proto="$(sed -e "s|{{TRACKER_FILE}}|$tr|g" -e "s|{{VERIFY_CMD}}|$vc|g" \
+      -e "s|{{STEP_TOKEN}}|$st|g" -e "s|{{DONE_TOKEN}}|$dt|g" "$tpl")"
+  if [ "${PARALLEL:-0}" -eq 1 ]; then
+    proto="${proto}
+8. NEVER run \`git stash\` — the stash stack is shared across parallel worktrees; commit through the gate or leave the tree dirty for the next turn."
+  fi
+  printf '%s\n' "$proto"
 }
 
 
