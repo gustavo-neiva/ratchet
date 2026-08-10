@@ -43,9 +43,15 @@ DONE_TOKEN=ALL_DONE
 #THINKING_LIGHT=off
 #THINKING_REVIEW=
 
-# Price-ordered model ranking for derived chains (used when tier-specific MODELS unset).
-# Fallback: auto-derived from models.dev catalog join. Snapshot on first use.
-#MODEL_RANK=anthropic/claude-opus-4-8,anthropic/claude-sonnet-4-5,zai/glm-5.2
+# Model ranking (STRONGEST FIRST) for derived tier chains — used when the
+# tier-specific *_MODELS keys are unset. This is the ONE skill knob: no free
+# signal ranks coding ability (price ≠ skill — a pricey creative model is not a
+# better coder), so YOUR ordering is the truth. plan=top, light=bottom, build=middle.
+# Unset → ratchet auto-derives by models.dev output-price as a cold-start prior
+# and warns that it's a guess. Non-coder families (fable/mythos/vision/*-5v) are
+# dropped from the AUTO path by construction; an explicit entry here is honored.
+# STRONGLY RECOMMENDED to set this one line.
+#MODEL_RANK=anthropic/claude-opus-4-8,anthropic/claude-sonnet-4-5,zai/glm-5.2,zai/glm-4.5-air
 
 # PR flow (autonomous mode with human merge gates). Default: done (today's behavior).
 #PR_CADENCE=done

@@ -1808,6 +1808,62 @@ else
 fi
 
 rm -rf "$tmp22_snap"
+
+# Test 12: non-coder families (fable/mythos/vision/-5v) dropped from AUTO rank
+tmp22_gate="$(mktemp -d)"
+export RATCHET_HOME="$tmp22_gate"
+cat > "$tmp22_gate/models.registry" <<'FIXTURE22GATE'
+anthropic/claude-fable-5
+anthropic/claude-mythos-5
+anthropic/claude-sonnet-4-5
+zai/glm-5.2
+zai/glm-5v-turbo
+FIXTURE22GATE
+cat > "$tmp22_gate/models.cost" <<'FIXTURE22GATE_COST'
+anthropic/claude-fable-5	3	15	true	true	200000
+anthropic/claude-mythos-5	3	15	true	true	200000
+anthropic/claude-sonnet-4-5	3	15	true	true	200000
+zai/glm-5.2	1.4	4.4	true	true	128000
+zai/glm-5v-turbo	0.5	1.5	true	true	128000
+FIXTURE22GATE_COST
+MODEL_RANK=""; ALLOWED_PROVIDERS=""
+ranked_gate="$(ranked_available_models 2>/dev/null)"
+if echo "$ranked_gate" | grep -qE 'fable|mythos|5v'; then
+  fail "non-coder gate: fable/mythos/5v should be dropped, got='$ranked_gate'"
+else
+  ok "non-coder gate: fable/mythos/vision dropped from derived rank"
+fi
+if echo "$ranked_gate" | head -1 | grep -q "anthropic/claude-sonnet-4-5"; then
+  ok "non-coder gate: real coder (sonnet-4-5) tops derived rank"
+else
+  fail "non-coder gate: expected sonnet-4-5 first, got=$(echo "$ranked_gate" | head -1)"
+fi
+
+# Test 13: explicit MODEL_RANK is NOT gated (human choice wins over the filter)
+rm -f "$tmp22_gate/rank.derived"
+MODEL_RANK="anthropic/claude-fable-5,anthropic/claude-sonnet-4-5"
+ranked_explicit="$(ranked_available_models 2>/dev/null)"
+if echo "$ranked_explicit" | head -1 | grep -q "anthropic/claude-fable-5"; then
+  ok "non-coder gate: explicit MODEL_RANK honored (fable kept when human-chosen)"
+else
+  fail "non-coder gate: explicit MODEL_RANK should keep fable first, got=$(echo "$ranked_explicit" | head -1)"
+fi
+
+# Test 14: no cost signal -> loud warning to stderr (not silent alphabetical)
+rm -f "$tmp22_gate/rank.derived" "$tmp22_gate/models.cost"
+cat > "$tmp22_gate/models.registry" <<'FIXTURE22NOCOST'
+anthropic/claude-sonnet-4-5
+zai/glm-5.2
+FIXTURE22NOCOST
+MODEL_RANK=""
+warn_out="$(_derive_rank_live 2>&1 >/dev/null)"
+if echo "$warn_out" | grep -qi "WARNING no cost/rank signal"; then
+  ok "loud fallback: warns when no cost signal (no silent alphabetical)"
+else
+  fail "loud fallback: expected WARNING on empty cost cache, got='$warn_out'"
+fi
+
+rm -rf "$tmp22_gate"
 rm -rf "$tmp22"
 
 echo ""

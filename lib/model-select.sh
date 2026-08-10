@@ -15,10 +15,28 @@
 #  keeps today's "no models configured" die path.
 # =============================================================================
 
+# _is_noncoder_model PROVIDER/ID -> 0 if the id is a known non-coder family
+# (creative-writing / vision / image). These land in the CODING rank only by
+# accident of price or alphabet (e.g. claude-fable-5 sorts before real coders),
+# so the derived path drops them by construction. An explicit MODEL_RANK entry
+# is honored regardless — this gate only guards AUTO-derivation, never a human
+# choice. Anchored to known families + generic vision/image tokens; every drop
+# is logged to stderr so a wrong exclusion is auditable, never silent.
+_is_noncoder_model() {
+  local id="${1#*/}"
+  case "$id" in
+    *fable*|*mythos*|*vision*|*image*|*-5v-*|*-5v|5v-*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # _derive_rank_live -> echo provider/id lines ordered by output price DESC, then
 # no-join models in registry order. Applies ALLOWED_PROVIDERS, filters out
-# tool_call=false (coding loop needs tools). Price heuristic: higher cost =
-# stronger. Ceiling: subsidized/subscription pricing (T6.3 adds outcome stats).
+# tool_call=false (coding loop needs tools) and known non-coder families.
+# Price heuristic: higher cost = stronger. Ceiling: subsidized/subscription
+# pricing + price-is-not-skill (set MODEL_RANK for the real signal; T6.3 adds
+# outcome stats). When NOTHING joins the cost cache, the order is arbitrary
+# registry order — that case warns loudly instead of pretending to rank.
 _derive_rank_live() {
   local reg avail=() m prov meta tool_call outp priced=() nojoin=()
   
@@ -41,6 +59,13 @@ _derive_rank_live() {
   
   # partition: priced with cost vs no-join
   for m in "${avail[@]}"; do
+    # capability gate: creative/vision families are not coders — drop from the
+    # auto-derived rank (logged; explicit MODEL_RANK is unaffected by this path).
+    if _is_noncoder_model "$m"; then
+      printf 'rank: dropped %s (non-coder family: creative/vision)\n' "$m" >&2
+      continue
+    fi
+
     meta="$(model_meta "$m")"
     if [ -z "$meta" ]; then
       nojoin+=("$m")
@@ -49,7 +74,7 @@ _derive_rank_live() {
     
     # field 5 = tool_call
     tool_call="$(echo "$meta" | cut -f5)"
-    [ "$tool_call" = "false" ] && continue  # drop tool_call=false
+    [ "$tool_call" = "false" ] && { printf 'rank: dropped %s (tool_call=false)\n' "$m" >&2; continue; }
     
     # field 3 = output cost
     outp="$(echo "$meta" | cut -f3)"
@@ -57,6 +82,13 @@ _derive_rank_live() {
     priced+=("$outp:$m")
   done
   
+  # No cost signal joined ANY model: the order below is arbitrary registry order,
+  # not a ranking. Warn loudly (stderr, so the echoed list stays clean) — the fix
+  # is one MODEL_RANK line, not a silent alphabetical mis-route into PLAN.
+  if [ "${#priced[@]}" -eq 0 ] && [ "${#nojoin[@]}" -gt 0 ]; then
+    printf 'rank: WARNING no cost/rank signal (models.dev cache empty and MODEL_RANK unset) — models are in arbitrary registry order, NOT ranked by skill. Set MODEL_RANK in ~/.ratchet/conf or run `ratchet models rank refresh`.\n' >&2
+  fi
+
   # sort by output cost DESC (-r = reverse), strip price prefix
   [ "${#priced[@]}" -gt 0 ] && printf '%s\n' "${priced[@]}" | sort -t: -k1 -rn | sed 's/^[^:]*://'
   

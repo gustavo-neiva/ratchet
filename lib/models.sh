@@ -246,7 +246,7 @@ cmd_models() {
         local reg=""; reg="$(pi_model_registry)" || \
           emit "note: pi registry unavailable — showing rank without validation marks"
         if [ -n "${MODEL_RANK:-}" ]; then
-          emit "effective rank: MODEL_RANK (explicit)"
+          emit "effective rank: MODEL_RANK (explicit) | signal: your ordering (skill)"
           local ranked
           ranked="$(ranked_available_models)" || die "failed to resolve MODEL_RANK"
           emit "$(_chain_with_marks "$(echo "$ranked" | paste -sd,)" "$reg")"
@@ -256,6 +256,14 @@ cmd_models() {
             emit "effective rank: derived (snapshot: $snap)"
           else
             emit "effective rank: derived (no snapshot yet; will be created on first use)"
+          fi
+          # signal used: cost-price when models.dev joined at least one model,
+          # else arbitrary registry order (no skill signal — set MODEL_RANK).
+          local cost="$RATCHET_HOME/models.cost"
+          if [ -s "$cost" ]; then
+            emit "signal: models.dev output-price (price≠skill — set MODEL_RANK for the real order)"
+          else
+            emit "signal: NONE — arbitrary registry order (no cost cache, MODEL_RANK unset). Set MODEL_RANK or run 'ratchet models rank refresh'."
           fi
           local ranked
           ranked="$(derived_rank)" || die "failed to derive rank"
