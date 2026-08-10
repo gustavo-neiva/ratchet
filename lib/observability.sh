@@ -182,7 +182,7 @@ with open(path, encoding='utf-8', errors='replace') as fh:
         elif rest.startswith('agent signaled'): dones+=1
         elif 'EXHAUSTED' in rest: exhausted+=1
         elif 'HARD ERROR' in rest: hard+=1
-        elif 'TIMEOUT (deadline' in rest: timeout+=1
+        elif rest.startswith('model ') and 'TIMEOUT (' in rest: timeout+=1
         elif 'transient failure' in rest: transient+=1
         elif rest.startswith('ALL models benched'): benched_ts=ts
 succ=steps+dones; att=succ+hard+transient+timeout
