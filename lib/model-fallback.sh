@@ -56,7 +56,17 @@ pick_model_index() {
   done
   echo "-1"; return 1
 }
-bench_model()    { cooldown_until_arr[$1]=$(( $(date +%s) + COOLDOWN )); transient_arr[$1]=0; }  # $1=index
+# Per-provider cooldown override: COOLDOWN_<PROVIDER> (e.g. COOLDOWN_ZAI=3600 for
+# an hourly-refresh provider) beats the global COOLDOWN. Provider is the model's
+# leading path segment, upper-cased, non-alnum → _. Unset → global COOLDOWN.
+cooldown_for_model() {
+  local prov var val
+  prov="${1%%/*}"; prov="${prov%%:*}"
+  var="COOLDOWN_$(printf '%s' "$prov" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')"
+  val="${!var:-}"
+  [ -n "$val" ] && echo "$val" || echo "$COOLDOWN"
+}
+bench_model()    { cooldown_until_arr[$1]=$(( $(date +%s) + $(cooldown_for_model "${models_arr[$1]}") )); transient_arr[$1]=0; }  # $1=index
 bump_transient() { transient_arr[$1]=$(( ${transient_arr[$1]:-0} + 1 )); }
 reset_all()      { local i; for ((i=0; i<${#models_arr[@]}; i++)); do cooldown_until_arr[i]=0; transient_arr[i]=0; done; }
 

@@ -495,6 +495,13 @@ REVIEW_MODELS="zai/glm-5.2"; MODELS="m/x"; got="$(chain_for_tier review)"
 REVIEW_MODELS=""; MODELS="m/x,m/y"; got="$(chain_for_tier review)"
 [ "$got" = "m/x,m/y" ] && ok "review-unset" || fail "review-unset -> got=$got want=m/x,m/y"
 
+# per-provider cooldown override (cooldown_for_model)
+COOLDOWN=14400; COOLDOWN_ZAI=3600
+[ "$(cooldown_for_model zai/glm-5.2)" = 3600 ] && ok "cooldown-provider-override" || fail "cooldown zai"
+[ "$(cooldown_for_model anthropic/claude-sonnet-4-5)" = 14400 ] && ok "cooldown-global-fallback" || fail "cooldown anthropic"
+[ "$(cooldown_for_model zai/glm:thinking)" = 3600 ] && ok "cooldown-strips-suffix" || fail "cooldown suffix"
+unset COOLDOWN_ZAI
+
 # thinking_for_tier: unset tier -> THINKING fallback, build-hard bump logic
 check_thinking() {  # NAME TIER PLAN_T BUILD_T LIGHT_T THINKING EXPECTED
   local name="$1" tier="$2" exp="$7" got

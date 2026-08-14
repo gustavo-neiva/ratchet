@@ -27,6 +27,8 @@ MERGE_WAIT_TIMEOUT PR_SOFT_MAX_LINES PARALLEL"
 
 _key_allowed() {  # _key_allowed KEY -> 0 if in allowlist
   local k="$1" kk
+  # COOLDOWN_<PROVIDER> per-provider overrides are allowed by prefix.
+  case "$k" in COOLDOWN_[A-Z0-9]*) return 0;; esac
   for kk in $CONTRACT_KEYS; do [ "$kk" = "$k" ] && return 0; done
   return 1
 }
@@ -59,7 +61,7 @@ parse_repo_conf() {
         esac
         # numeric keys: validate digits (defense; the loop still treats as string)
         case "$key" in
-          TURN_TIMEOUT|STALL_TIMEOUT|SHORT_SLEEP|MAX_TRANSIENT|COOLDOWN|BOTH_WAIT|TAIL_LINES|HEARTBEAT|\
+          TURN_TIMEOUT|STALL_TIMEOUT|SHORT_SLEEP|MAX_TRANSIENT|COOLDOWN|COOLDOWN_[A-Z0-9]*|BOTH_WAIT|TAIL_LINES|HEARTBEAT|\
           COMMIT_EACH_TURN|COMMIT_VERIFY_GATE|PUSH_ON_DONE|OPEN_PR|APPROVE_UI|\
           RESUME_SESSION|SANITIZE_THINKING|QUIET|STREAM_AGENT|RATCHET_PROTOCOL|\
           MAX_REVIEW_CYCLES|MERGE_POLL_SECS|MERGE_WAIT_TIMEOUT|PR_SOFT_MAX_LINES|PARALLEL)

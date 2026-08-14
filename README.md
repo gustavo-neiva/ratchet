@@ -2,7 +2,17 @@
 
 **An unattended-but-safe agent loop.** Survives provider rate limits and never commits a red tree.
 
-**The goal:** run a single long agent session across more than one AI provider and multiple models — so one hours-long run keeps going by switching providers/models as each hits its rate limit or daily quota, instead of stalling on any one.
+## The headline feature: one session, many providers, many models
+
+Ratchet's whole reason to exist is to run **one long agent session across more than one AI provider and multiple models at once** — best paired with the **Pi agent**, whose single CLI already speaks every provider (`--model anthropic/…`, `zai/…`, `openai/…`, `kimi-coding/…`), so ratchet just names the model per turn and Pi handles the auth.
+
+Give it a chain like `anthropic/claude-sonnet-4-5,zai/glm-5.2,openai/gpt-4` and a single run:
+
+- picks the **first available** model each turn;
+- when one hits its **daily quota / rate limit**, benches it for a cooldown (≈ the quota-refresh window) and instantly switches to the next;
+- when **all** are dry, sleeps out the window and resets — instead of dying.
+
+The payoff: **you stack every provider's free/daily quota into one continuous overnight run.** No single provider's cap can stop the work — the loop just rotates to whoever still has budget. Tag tasks by complexity and it even routes strong models to hard work and cheap models to trivial work (see [Tiered model routing](#tiered-model-routing)).
 
 Runs a coding agent (Pi, Claude, or any `-p` CLI) ONE turn at a time with multi-provider fallback + cooldowns, gating every commit on green. RED blocks the commit.
 
@@ -18,7 +28,7 @@ ratchet run my-repo     # unattended until ALL_DONE
 Run a headless coding agent **unattended** (hours, overnight) against any repo, until the work is done — while:
 
 - **Never committing red:** re-runs your test suite before EVERY commit. RED blocks the commit.
-- **Surviving rate limits:** multi-provider fallback + cooldowns (hours-long runs across daily quotas).
+- **Surviving rate limits:** multi-provider, multi-model fallback + cooldowns — stacks every provider's daily quota into one hours-long run (see above).
 - **Routing human judgment:** plan authoring, plan review, and PR review are human checkpoints. Mechanical execution runs unattended between them.
 - **Staying cheap:** ephemeral turns send only the tracker + files each turn, not a growing session — a fraction of a resumed session's per-turn cost. The tracker file is the memory.
 
@@ -309,6 +319,17 @@ measured figure.)
 - All benched → sleep `BOTH_WAIT`, reset, retry.
 
 This is how it survives unattended overnight runs.
+
+**Per-provider cooldowns:** providers don't all refresh on the same clock. Set
+`COOLDOWN_<PROVIDER>` to override the global cooldown for one provider — e.g. an
+hourly-refresh provider needn't wait the 4h daily default:
+
+```ini
+COOLDOWN=14400        # global default (4h ≈ daily refresh)
+COOLDOWN_ZAI=3600     # zai/* refreshes hourly → bench only 1h
+```
+
+Provider = the model's leading path segment (`zai/glm-5.2` → `ZAI`). Unset → global `COOLDOWN`.
 
 ### Tiered model routing
 
