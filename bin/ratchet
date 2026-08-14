@@ -92,7 +92,7 @@ parse_args() {
       --once)           ONCE=1; shift;;
       --selftest)       SELFTEST=1; COMMAND="selftest"; shift;;
       --stats)          STATS=1; COMMAND="stats"; shift;;
-      --watch)          WATCH=1; COMMAND="watch"; shift;;
+      --watch)          WATCH=1; [ -z "$COMMAND" ] && COMMAND="watch"; shift;;
       -v|--verbose)     VERBOSE=1; shift;;
       -h|--help)        usage; exit 0;;
       --) shift; break;;
@@ -358,7 +358,14 @@ main() {
     doctor)  cmd_doctor "$REPO_DIR" 0; exit $? ;;
     stats)   init_models "$MODELS"; cmd_stats; exit $? ;;
     watch)   init_models "$MODELS"; watch_session; exit $? ;;
-    status)  cmd_status; exit $? ;;
+    status)
+      if [ "${WATCH:-0}" = 1 ]; then
+        # ponytail: naive full-repaint on a fixed clock; diff-repaint only if flicker shows.
+        trap 'printf "\033[?25h"; exit 0' INT
+        printf '\033[?25l'   # hide cursor while repainting
+        while :; do printf '\033[H\033[2J'; cmd_status; sleep "${WATCH_INTERVAL:-2}"; done
+      fi
+      cmd_status; exit $? ;;
     fanout)       cmd_fanout "$REPO_DIR"; exit $? ;;
     fanout-clean) cmd_fanout_clean "$REPO_DIR"; exit $? ;;
   esac

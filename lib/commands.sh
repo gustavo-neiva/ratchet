@@ -386,34 +386,34 @@ cmd_status() {
   
   # Header: repo + loop-alive dot
   local repo_name; repo_name=$(basename "$REPO_DIR")
-  ansi_ok && printf '\033[1m%s\033[0m %s\n' "$repo_name" "$loop_alive_dot" || printf '%s %s\n' "$repo_name" "$loop_alive_dot"
+  printf '%s %s\n' "$(c_bold "$repo_name")" "$loop_alive_dot"
   
   # Progress bar with Step D/T (PCT%)
   local bar; bar=$(render_bar "$pct" 12)
-  printf 'Step %s/%s  [%s %d%%]\n' "$done_n" "$total_n" "$bar" "$pct"
+  printf 'Step %s/%s  [%s %s]\n' "$done_n" "$total_n" "$(c_green "$bar")" "$(c_blue "${pct}%")"
   
-  # Milestone tree with mini-bars
+  # Milestone tree with mini-bars (name padded so count column right-aligns)
   if [ -f "$tracker" ]; then
-    local ms_line ms_name ms_done ms_total ms_pct ms_bar marker
+    local ms_line ms_name ms_done ms_total ms_pct ms_bar marker line
     while IFS=$'\t' read -r ms_name ms_done ms_total; do
       ms_pct=0
       [ "$ms_total" -gt 0 ] && ms_pct=$(( ms_done * 100 / ms_total ))
       ms_bar=$(render_bar "$ms_pct" 6)
-      # Mark current milestone with ▶
+      # Mark + emphasize the current milestone; dim the rest.
+      line=$(printf '%-34s [%s]  %d/%d' "$ms_name" "$ms_bar" "$ms_done" "$ms_total")
       if [ "$ms_name" = "$mname" ]; then
-        marker="▶"
+        printf '%s %s\n' "$(c_blue '▶')" "$(c_bold "$line")"
       else
-        marker=" "
+        printf '  %s\n' "$(c_dim "$line")"
       fi
-      printf '%s %s  [%s]  %d/%d\n' "$marker" "$ms_name" "$ms_bar" "$ms_done" "$ms_total"
     done < <(tracker_milestones)
   fi
   
   # Current task + tier/model
   if [ "$task" != "—" ]; then
-    printf '\nCurrent: %s\n' "$task"
+    printf '\nCurrent: %s\n' "$(c_bold "$task")"
   fi
-  printf 'Tier/Model: %s / %s (thinking=%s)\n' "$tier" "$model" "$thinking"
+  printf 'Tier/Model: %s / %s (thinking=%s)\n' "$(c_purple "$tier")" "$(c_purple "$model")" "$thinking"
   
   # Node + review cycle
   if [ "$review_cycle" -gt 0 ]; then
@@ -454,7 +454,10 @@ cmd_status() {
     fi
   fi
   
-  printf '\nLoop: %s\n' "$loop_status"
+  case "$loop_status" in
+    running*)     printf '\nLoop: %s\n' "$(c_green "$loop_status")" ;;
+    *)            printf '\nLoop: %s\n' "$(c_dim "$loop_status")" ;;
+  esac
   printf 'Log: %s\n' "$log"
 }
 

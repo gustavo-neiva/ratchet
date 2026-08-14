@@ -27,6 +27,21 @@ ansi_ok() {
   [ -t 1 ] && [ -z "${NO_COLOR:-}" ]
 }
 
+# color CODE TEXT... -> wrap TEXT in SGR CODE + reset when ansi_ok, else passthrough.
+# Self-resetting per line (pi TUI rule: styles never carry across lines).
+# 8-color ANSI only, for portability. c_* are thin named aliases.
+color() {
+  local code=$1; shift
+  if ansi_ok; then printf '\033[%sm%s\033[0m' "$code" "$*"
+  else printf '%s' "$*"; fi
+}
+c_bold()   { color '1'  "$*"; }
+c_dim()    { color '2'  "$*"; }
+c_red()    { color '31' "$*"; }
+c_green()  { color '32' "$*"; }
+c_blue()   { color '34' "$*"; }
+c_purple() { color '35' "$*"; }
+
 # render_activity EVENTTYPE -> human verb for pi json stream event
 # Maps machine event types to readable activity verbs.
 render_activity() {
