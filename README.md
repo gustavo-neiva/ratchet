@@ -2,6 +2,8 @@
 
 **An unattended-but-safe agent loop.** Survives provider rate limits and never commits a red tree.
 
+**The goal:** run a single long agent session across more than one AI provider and multiple models — so one hours-long run keeps going by switching providers/models as each hits its rate limit or daily quota, instead of stalling on any one.
+
 Runs a coding agent (Pi, Claude, or any `-p` CLI) ONE turn at a time with multi-provider fallback + cooldowns, gating every commit on green. RED blocks the commit.
 
 ```bash
